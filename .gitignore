@@ -49,6 +49,19 @@ create_public_repo.sh
 # one account's remote and is a local operation, never a published one.
 force_push_scrubbed.sh
 
+# Same category again: the routine add-commit-push driver and its
+# read-only pre-flight. Both hardcode this repo's install location the
+# same way create_public_repo.sh does, and both drive this machine's git
+# identity and remote. See DevComms/log_002_pii_scrub.md, 2026-08-22
+# tidiness-pass section, for why this pair exists and what it refuses.
+git_commit_push.sh
+git_status.sh
+
+# The message handoff git_commit_push.sh reads from and empties after
+# each use. It is written by whichever session prepares a commit and is
+# never meaningful outside that one run.
+DevComms/next_commit_message.txt
+
 # ---- one-off migration handoff -------------------------------------------
 # Replacement text for the toolchain skill's SandboxDesign sections, and any
 # other skill handoff dropped in DevComms/. These name one machine's skill

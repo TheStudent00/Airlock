@@ -49,6 +49,13 @@ PATTERNS=(
   "email address|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"
   "personal handle of the maintainer|(^|[^A-Za-z])${h1}([^A-Za-z]|$)"
   "subuid/subgid mapping naming a real account|[a-z][a-z0-9_-]*:[0-9]{4,}:[0-9]{4,}"
+  # A disc-layout assumption, not a personal-information leak: it names
+  # the maintainer's projects-directory convention (shell form and the
+  # systemd %h specifier form). Written split across the alternation
+  # below so this line itself does not carry the literal string it
+  # scans for - see the note on the personal handle above for why that
+  # matters for a tracked, public file.
+  "disc-layout path assuming a specific projects directory|(~|%h)/Programming"
 )
 
 # Matches that are deliberately allowed. One extended regex per entry; a
