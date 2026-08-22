@@ -614,7 +614,54 @@ class Doctor:
                     % (paths.script("up.sh"), paths.script("down.sh"))))
             else:
                 found.append(Finding(OK, container, "running"))
+        found.extend(Doctor.check_binds(paths))
         return found
+
+    @staticmethod
+    def check_binds(paths):
+        """Is the running runner bound to THIS repo's agent folders?
+
+        The failure this exists to catch, seen 2026-08-22: a container
+        that survives a restart keeps the binds it was created with, so
+        a runner created by a DIFFERENT checkout of this design goes on
+        watching that checkout's agent/drop. Every other check passes -
+        podman is up, the container runs, the toolchains answer - while
+        lanes queued here are never seen at all. `up.sh` only starts an
+        existing container, so the state persists until it is removed.
+        """
+        template = ("{{range .Mounts}}{{.Source}}|{{.Destination}}"
+                    "{{println}}{{end}}")
+        mounts = podman_inspect(RUNNER, template)
+        if mounts is None:
+            return []                    # container absent; already reported
+        bound = {}
+        for row in mounts.splitlines():
+            if "|" not in row:
+                continue
+            source, destination = row.split("|", 1)
+            bound[destination.strip()] = source.strip()
+        wrong = []
+        for destination, expected in (("/drop", paths.drop),
+                                      ("/status", paths.status),
+                                      ("/logs", paths.logs),
+                                      ("/out", paths.out)):
+            actual = bound.get(destination)
+            if actual is None:
+                wrong.append("%s is not bound at all" % destination)
+            elif os.path.realpath(actual) != os.path.realpath(expected):
+                wrong.append("%s -> %s, not %s"
+                             % (destination, actual, expected))
+        if not wrong:
+            return [Finding(OK, "agent binds",
+                            "%s is bound to this repo's agent folders"
+                            % RUNNER)]
+        return [Finding(
+            FAULT, "agent binds",
+            "%s is bound elsewhere, so lanes queued here are never seen: %s"
+            % (RUNNER, "; ".join(wrong)),
+            "podman rm -f %s %s   then   bash %s   (up.sh only STARTS an "
+            "existing container, so it cannot rebind one)"
+            % (RUNNER, PROXY, paths.script("up.sh")))]
 
     @staticmethod
     def check_cores(paths):
