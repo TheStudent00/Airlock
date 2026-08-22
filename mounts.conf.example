@@ -1,0 +1,48 @@
+# mounts.conf — which host directories this machine's sandbox can see.
+#
+# THIS FILE IS THE EXAMPLE. Copy it to `mounts.conf` and edit that:
+#
+#     cp mounts.conf.example mounts.conf
+#     ./install_quadlet.sh
+#
+# `mounts.conf` is gitignored. It is per-machine, per-project
+# configuration. Airlock itself is project-agnostic, so no project's
+# paths belong in the repo - this file is the ONLY place a real path is
+# ever named, and it is never committed.
+#
+# FORMAT — one mount per line:
+#
+#     <host path>:<container path>[:<mode>]
+#
+#   host path       absolute, or ~/... . Must exist at install time.
+#   container path  absolute, where it appears inside the container.
+#   mode            ro (default) or rw. Leave it off unless a run must
+#                   WRITE to the host tree — /out exists for products,
+#                   and read-only is what makes "the runner cannot
+#                   damage the original" true rather than hoped.
+#
+# Blank lines and # comments are ignored.
+#
+# The agent lane mounts (/drop, /out, /logs, /status) are NOT listed
+# here. They are the mechanism itself, not configuration, so they stay
+# in quadlet/sandbox-runner.container.
+#
+# ---------------------------------------------------------------------
+# Examples. Delete these and write your own.
+# ---------------------------------------------------------------------
+
+# A project to run tests against, read-only:
+# ~/code/MyProject:/projects/MyProject
+
+# A large read-only corpus shared by several projects. Keep such trees
+# out of per-project mounts so they are fetched and stored once:
+# ~/code/Sources:/sources
+
+# A scratch tree the runner may write to (rare — prefer /out):
+# ~/code/Scratch:/scratch:rw
+
+# ---------------------------------------------------------------------
+# Sizing note, learned the hard way: do NOT mount a home directory or
+# anything containing multi-gigabyte trees wholesale. A recursive walk
+# over one of those exhausts file descriptors and wedges the caller.
+# Mount the specific subdirectory a run actually needs.

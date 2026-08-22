@@ -1,0 +1,6 @@
+# Ordinary network with a route out. ONLY the proxy is attached to it.
+[Unit]
+Description=Sandbox egress network (proxy only)
+
+[Network]
+NetworkName=sandbox-egress

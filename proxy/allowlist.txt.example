@@ -1,0 +1,45 @@
+# Hostnames the sandbox runner is permitted to reach. One per line.
+# A leading dot matches subdomains: ".pypi.org" matches "files.pypi.org".
+# Anything not listed is refused and logged.
+#
+# Edit with ./allow.sh, which rewrites this file and reloads squid
+# without restarting the container.
+#
+# --- Ubuntu packages ---
+.ubuntu.com
+.archive.ubuntu.com
+.security.ubuntu.com
+.canonical.com
+
+# --- Python ---
+.pypi.org
+.pythonhosted.org
+.astral.sh
+
+# --- Rust ---
+.crates.io
+.static.crates.io
+.rust-lang.org
+
+# --- Go ---
+.proxy.golang.org
+.sum.golang.org
+.golang.org
+.go.dev
+
+# --- Node ---
+.registry.npmjs.org
+.npmjs.org
+.nodejs.org
+
+# --- Java / Kotlin ---
+.repo1.maven.org
+.maven.org
+.gradle.org
+
+# --- source hosting (many builds fetch from these) ---
+.github.com
+.githubusercontent.com
+.gitlab.com
+.swift.org
+.download.swift.org

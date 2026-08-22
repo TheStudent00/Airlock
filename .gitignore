@@ -1,0 +1,78 @@
+# Airlock tracks the MECHANISM. Anything a live run writes, and anything
+# that describes one particular machine, stays out of the repo.
+#
+# The directories under agent/ are tracked but their CONTENTS are not:
+# each carries its own .gitignore holding `*` and `!.gitignore`, so a
+# fresh clone has drop/ out/ logs/ status/ present and empty and the
+# daemon has somewhere to write on the first run. Those four files are
+# the "fresh clone works" structure — do not delete them.
+
+# ---- runtime state, written by a run -------------------------------------
+agent/drop/*
+!agent/drop/.gitignore
+agent/out/*
+!agent/out/.gitignore
+agent/logs/*
+!agent/logs/.gitignore
+agent/status/*
+!agent/status/.gitignore
+agent/batch.json
+agent/.batch.json.tmp.*
+agent/batch.json.airlock.tmp
+
+# ---- per-machine configuration -------------------------------------------
+# Which host directories THIS install exposes. mounts.conf.example is
+# committed and is the documentation; the real file never is.
+mounts.conf
+
+# Which hosts THIS install may reach. Same pattern: the .example is the
+# committed baseline a new install copies from.
+proxy/allowlist.txt
+
+# ---- captured records of one machine's runs ------------------------------
+# probe_host.sh, report.sh, submit_project.sh and install_quadlet.sh all
+# write into DevComms/. Those files name real paths on a real machine and
+# are records, not documentation. The hand-written logs are tracked.
+DevComms/host_inventory.txt
+DevComms/sandbox_report.txt
+DevComms/last_run.txt
+DevComms/quadlet_install.txt
+
+# ---- one person's host workflow ------------------------------------------
+# A script that names one machine's layout and drives that machine's GitHub
+# account is exactly what SandboxDesign's create_github_repo.sh was, and why
+# it was not carried across. This one is deliberately gitignored; it lives on
+# the machine that runs it and is never published.
+create_public_repo.sh
+
+# Same category: the one-shot force-push of the rewritten history. It drives
+# one account's remote and is a local operation, never a published one.
+force_push_scrubbed.sh
+
+# ---- one-off migration handoff -------------------------------------------
+# Replacement text for the toolchain skill's SandboxDesign sections, and any
+# other skill handoff dropped in DevComms/. These name one machine's skill
+# cache, its hardware and its project repos, so tracking one would be the
+# project-specific drift README.md's contract forbids - and would publish
+# personal information. They are handoff documents for a session, not
+# documentation of the tool. Delete them once the skill is saved.
+#
+# The glob is deliberate: an earlier handoff sat here under a name the
+# single-file rule did not cover, untracked but NOT ignored, one `git add -A`
+# away from publication. scrub_check.sh now flags that class as well.
+DevComms/toolchain_skill_airlock_patch.md
+DevComms/toolchain_*
+DevComms/*_SKILL_*
+
+# ---- local-only scrub patterns -------------------------------------------
+# Extra "<label>|<regex>" lines for scrub_check.sh that are themselves too
+# specific to a person or machine to publish.
+.scrub_patterns.local
+
+# ---- build and editor artefacts ------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.log
+run_logs/

@@ -1,0 +1,3 @@
+# Track the directory, not the per-run status files.
+*
+!.gitignore

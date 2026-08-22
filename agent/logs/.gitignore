@@ -1,0 +1,3 @@
+# Track the directory, not the run logs.
+*
+!.gitignore

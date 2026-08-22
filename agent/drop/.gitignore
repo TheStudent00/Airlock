@@ -1,0 +1,4 @@
+# Track the directory, not what passes through it. Scripts dropped here are
+# transient; the daemon archives what it ran into .done/.
+*
+!.gitignore

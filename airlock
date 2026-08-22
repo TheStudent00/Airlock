@@ -1,0 +1,1335 @@
+#!/usr/bin/env python3
+"""airlock - the command-line front door to an Airlock sandbox.
+
+THE FILE PROTOCOL IS THE TRUTH. agent/drop -> agent/status -> agent/logs
+-> agent/out is the interface, and it stays the interface. This file is a
+CLIENT that checks before it writes. A hand-drop still works, every shell
+script in this repo still works, and nothing downstream may require this
+program to exist. It is the DOCUMENTED way in, not the only one.
+
+ONE SOURCE OF TRUTH FOR CONTAINER FLAGS. up / down / allow shell out to
+up.sh / down.sh / allow.sh. No podman flag is spelled twice.
+
+NOTHING PROJECT-SPECIFIC. No project name, no project path and no lane
+script belongs in this file, or anywhere else in this repo. A project
+owns its lanes; Airlock owns the container and the protocol.
+
+Stdlib only, python3. Run either way, from wherever this repo sits:
+    <airlock>/airlock <command> ...
+    python3 <airlock>/airlock <command> ...
+
+Derived from SandboxDesign's `sandbox`, 2026-08-22. Derivation record:
+DevComms/log_001_airlock_derivation.md
+"""
+
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+
+# ---- severity vocabulary, shared by submit and doctor -------------------
+# REFUSE  submit will not drop this lane; exit non-zero.
+# FAULT   doctor found something broken or inconsistent; exit non-zero.
+# WARN    named loudly, does not stop anything.
+# NOTE    context a reader needs; never an error.
+# OK      checked and correct; printed so silence is never the answer.
+REFUSE = "REFUSE"
+FAULT = "FAULT"
+WARN = "WARN"
+NOTE = "NOTE"
+OK = "OK"
+
+SEVERITY_ORDER = {REFUSE: 0, FAULT: 1, WARN: 2, NOTE: 3, OK: 4}
+BLOCKING = (REFUSE, FAULT)
+
+RUNNER = "sandbox-runner"
+PROXY = "sandbox-proxy"
+
+# A lane is expected to print its own progress as [n/total]; progress.sh
+# reads exactly that to compute the current lane's percentage and ETA.
+PROGRESS_RUN = re.compile(r"\[\s*\d+\s*/\s*\d+\s*\]")
+PROGRESS_TEMPLATE = re.compile(r"\[[^\]\n]*[$%][^\]\n]*/[^\]\n]*\]")
+
+SHELL_INTERPRETERS = ("bash", "sh", "dash", "ksh", "zsh")
+
+# Probed inside the running container by check_toolchains. Kept short on
+# purpose: report.sh already prints the full inventory.
+TOOLCHAIN_PROBE = ("python3", "rustc", "cargo", "go", "node", "javac",
+                   "gcc", "clang", "git")
+
+
+class Finding:
+    """One judgement: how bad, about what, what was seen, what to do.
+
+    The same object carries a submit refusal and a doctor fault, so there
+    is one severity vocabulary in the program rather than two.
+    """
+
+    def __init__(self, severity, subject, detail, remedy=""):
+        self.severity = severity
+        self.subject = subject
+        self.detail = detail
+        self.remedy = remedy
+
+    def line(self):
+        """This finding as one plain line. Renders own fields."""
+        text = "  %-6s %s: %s" % (self.severity, self.subject, self.detail)
+        if self.remedy:
+            text += "\n         what to do: " + self.remedy
+        return text
+
+    def row(self):
+        """This finding as markdown pipe-table cells. Renders own fields."""
+        return [self.severity, self.subject, self.detail, self.remedy or "-"]
+
+
+class Paths:
+    """Every path the CLI reads, writes or names, resolved from one root."""
+
+    def __init__(self, root):
+        self.root = os.path.abspath(root)
+        agent = os.path.join(self.root, "agent")
+        self.drop = os.path.join(agent, "drop")
+        self.done = os.path.join(self.drop, ".done")
+        self.status = os.path.join(agent, "status")
+        self.logs = os.path.join(agent, "logs")
+        self.out = os.path.join(agent, "out")
+        self.batch_file = os.path.join(agent, "batch.json")
+        self.allowlist = os.path.join(self.root, "proxy", "allowlist.txt")
+        self.quadlet_runner = os.path.join(
+            self.root, "quadlet", "sandbox-runner.container")
+
+    @staticmethod
+    def resolve(root_flag=None):
+        """Build a Paths from the first root that is named.
+
+        Precedence: --root, then AIRLOCK_ROOT, then SANDBOX_DESIGN_ROOT,
+        then this file's own directory. The SandboxDesign spelling is
+        still honoured so a project moving to Airlock need not change
+        its environment on the same day it changes the command name;
+        AIRLOCK_ROOT wins wherever both are set.
+
+        Static: there is no instance until this returns one.
+        """
+        root = (root_flag
+                or os.environ.get("AIRLOCK_ROOT")
+                or os.environ.get("SANDBOX_DESIGN_ROOT"))
+        if not root:
+            root = self_root()
+        return Paths(root)
+
+    def script(self, name):
+        """Full path of a shell script in the root. Joins self.root."""
+        return os.path.join(self.root, name)
+
+
+class Lane:
+    """One lane script on its way into agent/drop."""
+
+    def __init__(self, source_path, weight=1):
+        self.source_path = os.path.abspath(source_path)
+        self.name = os.path.basename(self.source_path)
+        self.weight = weight
+
+    def validate(self, paths):
+        """Judge this lane's own name and file. Returns a list of Finding.
+
+        Instance method: the judgement is about this lane's name and this
+        lane's bytes.
+        """
+        found = []
+
+        if not os.path.isfile(self.source_path):
+            return [Finding(
+                REFUSE, self.name,
+                "no such lane file: %s" % self.source_path,
+                "check the path, or write the lane first")]
+
+        if not os.access(self.source_path, os.R_OK):
+            return [Finding(
+                REFUSE, self.name,
+                "lane file is not readable: %s" % self.source_path,
+                "chmod u+r %s" % self.source_path)]
+        try:
+            with open(self.source_path, "rb") as handle:
+                raw = handle.read()
+        except OSError as ex:
+            return [Finding(
+                REFUSE, self.name,
+                "lane file could not be read: %s (%s)" % (self.source_path, ex),
+                "check permissions on %s" % self.source_path)]
+
+        if self.name.startswith("."):
+            found.append(Finding(
+                REFUSE, self.name,
+                "a name starting with '.' is ignored forever by "
+                "daemon/watcher.py is_runnable(); it would sit in %s and "
+                "no agent session can unlink it" % paths.drop,
+                "rename the lane so it does not start with '.'"))
+        if not self.name.endswith(".sh"):
+            found.append(Finding(
+                REFUSE, self.name,
+                "the daemon only runs *.sh; %s would never be executed and "
+                "would sit in %s forever" % (self.name, paths.drop),
+                "rename it to end in .sh"))
+
+        if not os.path.isdir(paths.drop):
+            found.append(Finding(
+                REFUSE, self.name,
+                "no drop directory: %s" % paths.drop,
+                "bash %s (it creates the agent lane directories)"
+                % paths.script("up.sh")))
+        else:
+            queued = os.path.join(paths.drop, self.name)
+            if os.path.exists(queued):
+                found.append(Finding(
+                    REFUSE, self.name,
+                    "a lane of this name is already queued (or running) at %s"
+                    % queued,
+                    "wait for it, or give this lane a different name"))
+
+        if os.path.isdir(paths.done):
+            suffix = "__" + self.name
+            archived = sorted(e for e in os.listdir(paths.done)
+                              if e.endswith(suffix))
+            if archived:
+                found.append(Finding(
+                    REFUSE, self.name,
+                    "a lane of this name has already run: %s"
+                    % os.path.join(paths.done, archived[-1]),
+                    "reusing the name overwrites %s, losing the earlier run's "
+                    "record - give this lane a new name"
+                    % os.path.join(paths.status, self.name + ".status")))
+
+        first_line = raw.split(b"\n", 1)[0].decode("utf-8", "replace").strip()
+        if not first_line.startswith("#!"):
+            found.append(Finding(
+                REFUSE, self.name,
+                "no shebang on the first line of %s (saw %r)"
+                % (self.source_path, first_line[:40]),
+                "add #!/usr/bin/env bash as the first line"))
+        else:
+            interpreter = _shebang_interpreter(first_line)
+            if interpreter and interpreter not in SHELL_INTERPRETERS:
+                found.append(Finding(
+                    WARN, self.name,
+                    "the shebang names '%s', but daemon/watcher.py execs "
+                    "/bin/bash <lane> unconditionally, so this lane will be "
+                    "run by bash whatever the shebang says" % interpreter,
+                    "make the lane a bash script that calls %s, or accept "
+                    "that the shebang is decoration here" % interpreter))
+
+        if b"\r\n" in raw:
+            found.append(Finding(
+                WARN, self.name,
+                "CRLF line endings in %s; bash fails on the trailing \\r in "
+                "ways that read as nonsense in the log" % self.source_path,
+                "convert to LF, e.g. sed -i 's/\\r$//' %s" % self.source_path))
+
+        text = raw.decode("utf-8", "replace")
+        if not (PROGRESS_RUN.search(text) or PROGRESS_TEMPLATE.search(text)):
+            found.append(Finding(
+                WARN, self.name,
+                "no [n/total]-style progress print found in %s; progress.sh "
+                "reads exactly that for the current lane's percentage and "
+                "ETA, so this lane will show as 'running, no [n/total] "
+                "progress line in its log yet' for its whole run"
+                % self.source_path,
+                "print a line containing [$i/$total] as the lane advances"))
+
+        return found
+
+    def drop_into(self, paths):
+        """Write this lane's file as .<name>, then rename it to <name>.
+
+        Hidden-then-rename is what daemon/watcher.py's is_runnable() and
+        moved_to watch are built around: the visible name never exists in
+        a partial state.
+        """
+        hidden = os.path.join(paths.drop, "." + self.name)
+        final = os.path.join(paths.drop, self.name)
+        with open(self.source_path, "rb") as src:
+            data = src.read()
+        with open(hidden, "wb") as dst:
+            dst.write(data)
+            dst.flush()
+            os.fsync(dst.fileno())
+        os.replace(hidden, final)
+        return final
+
+
+class Batch:
+    """agent/batch.json - the denominator progress.sh reports against."""
+
+    def __init__(self, batch_id, label, created, lanes):
+        self.batch_id = batch_id
+        self.label = label
+        self.created = created
+        self.lanes = lanes          # list of [name, weight]
+
+    @staticmethod
+    def read(paths):
+        """Read agent/batch.json, or None if absent or unreadable."""
+        if not os.path.isfile(paths.batch_file):
+            return None
+        try:
+            with open(paths.batch_file, "r") as handle:
+                doc = json.load(handle)
+        except (OSError, ValueError):
+            return None
+        lanes = []
+        for entry in doc.get("lanes", []):
+            name = entry.get("script")
+            if not name:
+                continue
+            lanes.append([name, entry.get("weight", 0)])
+        return Batch(doc.get("batch_id", ""), doc.get("label", ""),
+                     doc.get("created", ""), lanes)
+
+    def add_lane(self, name, weight):
+        """Add or update one lane in this manifest's own lane list."""
+        for entry in self.lanes:
+            if entry[0] == name:
+                entry[1] = weight
+                return False
+        self.lanes.append([name, weight])
+        return True
+
+    def write(self, paths):
+        """Write this manifest in batch.sh's exact format, one lane per line.
+
+        progress.sh's parser is line-based; a wrapped lane object is read
+        as nothing at all.
+        """
+        body = ["{",
+                '  "batch_id": "%s",' % self.batch_id,
+                '  "label": "%s",' % self.label,
+                '  "created": "%s",' % self.created,
+                '  "lanes": [']
+        for index, (name, weight) in enumerate(self.lanes):
+            comma = "," if index < len(self.lanes) - 1 else ""
+            body.append('    { "script": "%s", "weight": %s }%s'
+                        % (name, _fmt_number(weight), comma))
+        body.append("  ]")
+        body.append("}")
+        os.makedirs(os.path.dirname(paths.batch_file), exist_ok=True)
+        tmp = paths.batch_file + ".airlock.tmp"
+        with open(tmp, "w") as handle:
+            handle.write("\n".join(body) + "\n")
+        os.replace(tmp, paths.batch_file)
+        return paths.batch_file
+
+    def summary(self):
+        """One line naming this manifest's label, id and lane count."""
+        total = sum(float(w or 0) for _, w in self.lanes)
+        return ("batch '%s' (id %s, created %s): %d lane(s), total weight %s"
+                % (self.label, self.batch_id, self.created,
+                   len(self.lanes), _fmt_number(total)))
+
+
+class LaneStatus:
+    """One agent/status/<name>.status file, read into fields."""
+
+    def __init__(self, name, fields):
+        self.name = name
+        self.fields = fields
+        self.state = fields.get("state", "unknown")
+        self.exit_code = fields.get("exit", "")
+        self.started = fields.get("started", "")
+        self.elapsed_s = fields.get("elapsed_s", "")
+        # The daemon records the CONTAINER path (/logs/...). The host copy
+        # is the same basename under agent/logs.
+        self.log_path = fields.get("log", "")
+        self.verdict = fields.get("verdict", "")
+
+    @staticmethod
+    def read(paths, name):
+        """Read one status file, or None if there is none."""
+        path = os.path.join(paths.status, name + ".status")
+        if not os.path.isfile(path):
+            return None
+        fields = {}
+        try:
+            with open(path, "r") as handle:
+                for raw in handle:
+                    if "=" in raw:
+                        key, value = raw.rstrip("\n").split("=", 1)
+                        fields[key] = value
+        except OSError:
+            return None
+        return LaneStatus(fields.get("script", name), fields)
+
+    @staticmethod
+    def read_all(paths):
+        """Read every status file, newest first."""
+        if not os.path.isdir(paths.status):
+            return []
+        entries = []
+        for entry in os.listdir(paths.status):
+            if not entry.endswith(".status") or entry.startswith("."):
+                continue
+            full = os.path.join(paths.status, entry)
+            try:
+                entries.append((os.path.getmtime(full), entry[:-len(".status")]))
+            except OSError:
+                continue
+        entries.sort(reverse=True)
+        out = []
+        for _, name in entries:
+            one = LaneStatus.read(paths, name)
+            if one is not None:
+                out.append(one)
+        return out
+
+    def host_log(self, paths):
+        """This lane's log as the host sees it, or '' if it is not there."""
+        if not self.log_path:
+            return ""
+        candidate = os.path.join(paths.logs, os.path.basename(self.log_path))
+        return candidate if os.path.isfile(candidate) else ""
+
+    def display_state(self):
+        """state, with the OS-stopped outcome rendered as ABORT.
+
+        daemon/watcher.py writes `KILLED after <n>s timeout` into the
+        status file. That spelling is the daemon's and stays untouched in
+        the file; this program's own word for the outcome is ABORT.
+        """
+        if self.verdict.startswith("KILLED"):
+            return "ABORT"
+        return self.state
+
+    def progress_line(self, paths):
+        """The latest [n/total] line from the log this status names."""
+        log = self.host_log(paths)
+        if not log:
+            return ""
+        try:
+            with open(log, "rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                size = handle.tell()
+                handle.seek(max(0, size - 4000))
+                tail = handle.read().decode("utf-8", "replace")
+        except OSError:
+            return ""
+        marks = PROGRESS_RUN.findall(tail.replace("\r", "\n"))
+        return marks[-1] if marks else ""
+
+    def row(self, paths):
+        """This lane's markdown pipe-table cells."""
+        return [self.name, self.display_state(),
+                self.exit_code or "-",
+                (self.elapsed_s + "s") if self.elapsed_s else "-",
+                self.progress_line(paths) or "-"]
+
+
+class Doctor:
+    """Every check, each answering with Findings.
+
+    `findings` is the Doctor's own accumulated state, so run and report
+    are instance methods. Each check_* is a @staticmethod: it takes
+    paths, returns a fresh list, and touches no Doctor state.
+    """
+
+    def __init__(self):
+        self.findings = []
+
+    def run(self, paths):
+        """Run every check in order, accumulating into self.findings."""
+        for check in (Doctor.check_container, Doctor.check_cores,
+                      Doctor.check_drop_clean, Doctor.check_toolchains,
+                      Doctor.check_allowlist, Doctor.check_disk):
+            try:
+                self.findings.extend(check(paths))
+            except Exception as ex:                     # a check must never
+                self.findings.append(Finding(           # take the rest down
+                    WARN, check.__name__,
+                    "the check itself failed: %s" % ex,
+                    "report this; the remaining checks still ran"))
+        return self.findings
+
+    @staticmethod
+    def check_container(paths):
+        """Is podman present, and are sandbox-runner and sandbox-proxy up."""
+        if shutil.which("podman") is None:
+            return [Finding(
+                NOTE, "podman",
+                "podman is not on PATH here, so every container check is "
+                "skipped; the file checks below all ran",
+                "expected inside an agent session that has no container "
+                "runtime; on the host it means podman is not installed")]
+        found = [Finding(OK, "podman", "podman is on PATH at %s"
+                         % shutil.which("podman"))]
+        for container in (RUNNER, PROXY):
+            state = podman_inspect(container, "{{.State.Status}}")
+            if state is None:
+                found.append(Finding(
+                    WARN, container,
+                    "no such container - the sandbox is down",
+                    "bash %s" % paths.script("up.sh")))
+            elif state != "running":
+                found.append(Finding(
+                    FAULT, container,
+                    "the container exists but its state is '%s'" % state,
+                    "bash %s, or bash %s to remove it"
+                    % (paths.script("up.sh"), paths.script("down.sh"))))
+            else:
+                found.append(Finding(OK, container, "running"))
+        return found
+
+    @staticmethod
+    def check_cores(paths):
+        """Cores actually granted vs the cpu setting vs the quadlet unit.
+
+        Three numbers that are allowed to disagree: podman inspect's
+        NanoCpus, up.sh's own default, and
+        quadlet/sandbox-runner.container's PodmanArgs=--cpus. Airlock
+        ships with the last two in agreement at the full share, ruled
+        2026-08-22; this check is what tells you if they drift apart.
+        """
+        found = []
+        up_default = _grep_number(paths.script("up.sh"),
+                                  r"(?:AIRLOCK|SANDBOX)_CPUS:-([0-9.]+)")
+        quadlet_cpus = _grep_number(paths.quadlet_runner,
+                                    r"PodmanArgs=.*--cpus=([0-9.]+)")
+        env_cpus = (os.environ.get("AIRLOCK_CPUS")
+                    or os.environ.get("SANDBOX_CPUS"))
+
+        if up_default is None:
+            found.append(Finding(
+                WARN, "AIRLOCK_CPUS",
+                "could not read a cpu default out of %s"
+                % paths.script("up.sh"),
+                "check that the AIRLOCK_CPUS:-${SANDBOX_CPUS:-<n>} line is "
+                "still there"))
+        else:
+            found.append(Finding(
+                NOTE, "AIRLOCK_CPUS",
+                "%s defaults to %s cpu(s)"
+                % (paths.script("up.sh"), _fmt_number(up_default)),
+                "AIRLOCK_CPUS=3 bash %s throttles a long run; the older "
+                "SANDBOX_CPUS spelling is still read, after AIRLOCK_CPUS"
+                % paths.script("up.sh")))
+        if env_cpus:
+            found.append(Finding(
+                NOTE, "AIRLOCK_CPUS",
+                "a cpu setting of %s is present in this environment; it "
+                "applies only to a container started from here" % env_cpus))
+
+        # Reported whether or not podman is here, because the two ways of
+        # starting the sandbox are allowed to drift and nothing else says so.
+        if quadlet_cpus is None:
+            found.append(Finding(
+                NOTE, "quadlet cpus",
+                "no PodmanArgs=--cpus line in %s" % paths.quadlet_runner))
+        elif up_default is not None and quadlet_cpus != up_default:
+            found.append(Finding(
+                WARN, "quadlet vs up.sh",
+                "%s hardcodes --cpus=%s, independent of the environment, "
+                "which %s defaults to %s. The systemd-managed sandbox and "
+                "the ./up.sh sandbox therefore run at different speeds from "
+                "the same repo"
+                % (paths.quadlet_runner, _fmt_number(quadlet_cpus),
+                   paths.script("up.sh"), _fmt_number(up_default)),
+                "make the two agree: edit PodmanArgs=--cpus in %s, or the "
+                "default in %s" % (paths.quadlet_runner,
+                                   paths.script("up.sh"))))
+        else:
+            found.append(Finding(
+                OK, "quadlet vs up.sh",
+                "%s and %s agree on %s cpu(s)"
+                % (paths.quadlet_runner, paths.script("up.sh"),
+                   _fmt_number(quadlet_cpus))))
+
+        granted = _granted_cores()
+        if granted is None:
+            found.append(Finding(
+                NOTE, "granted cores",
+                "cannot read what %s was actually granted (podman inspect "
+                "unavailable or the container is not there)" % RUNNER))
+        else:
+            expected = up_default if env_cpus is None else float(env_cpus)
+            if expected is not None and abs(granted - expected) > 0.01:
+                found.append(Finding(
+                    WARN, "granted cores",
+                    "%s was actually granted %s cpu(s), but the current "
+                    "setting says %s - the container predates the change"
+                    % (RUNNER, _fmt_number(granted), _fmt_number(expected)),
+                    "bash %s then bash %s to restart it at the current "
+                    "setting" % (paths.script("down.sh"),
+                                 paths.script("up.sh"))))
+            else:
+                found.append(Finding(
+                    OK, "granted cores",
+                    "%s was actually granted %s cpu(s), matching the setting"
+                    % (RUNNER, _fmt_number(granted))))
+        return found
+
+    @staticmethod
+    def check_drop_clean(paths):
+        """Non-.sh clutter sitting in agent/drop that no session can unlink."""
+        if not os.path.isdir(paths.drop):
+            return [Finding(
+                FAULT, "agent/drop",
+                "no drop directory at %s - there is nowhere to submit a lane"
+                % paths.drop,
+                "bash %s" % paths.script("up.sh"))]
+        keep = {".done", ".gitignore"}
+        clutter, queued = [], []
+        for entry in sorted(os.listdir(paths.drop)):
+            if entry in keep:
+                continue
+            if entry.endswith(".sh") and not entry.startswith("."):
+                queued.append(entry)
+            else:
+                clutter.append(entry)
+        found = []
+        for entry in clutter:
+            found.append(Finding(
+                WARN, "agent/drop clutter",
+                "%s is not a runnable lane, so daemon/watcher.py will ignore "
+                "it forever" % os.path.join(paths.drop, entry),
+                "rm '%s' - it has to be done on the host, because a lane "
+                "running inside the sandbox cannot unlink it (/drop is a "
+                "bind mount the lane may write to but should not tidy)"
+                % os.path.join(paths.drop, entry)))
+        if not clutter:
+            found.append(Finding(
+                OK, "agent/drop clutter",
+                "nothing but runnable lanes in %s" % paths.drop))
+        if queued:
+            found.append(Finding(
+                NOTE, "agent/drop queue",
+                "%d lane(s) waiting in %s: %s"
+                % (len(queued), paths.drop, ", ".join(queued))))
+        return found
+
+    @staticmethod
+    def check_toolchains(paths):
+        """Which baked-in toolchains answer inside the running container."""
+        if shutil.which("podman") is None:
+            return [Finding(
+                NOTE, "toolchains",
+                "skipped - podman is not on PATH, so nothing can be asked of "
+                "the container",
+                "the last recorded answer is in %s"
+                % os.path.join(paths.root, "DevComms", "sandbox_report.txt"))]
+        if podman_inspect(RUNNER, "{{.State.Status}}") != "running":
+            return [Finding(
+                NOTE, "toolchains",
+                "skipped - %s is not running" % RUNNER,
+                "bash %s" % paths.script("up.sh"))]
+        probe = "; ".join("command -v %s >/dev/null 2>&1 || echo MISSING %s"
+                          % (tool, tool) for tool in TOOLCHAIN_PROBE)
+        try:
+            result = subprocess.run(
+                ["podman", "exec", RUNNER, "bash", "-lc", probe],
+                capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as ex:
+            return [Finding(WARN, "toolchains",
+                            "could not probe inside %s: %s" % (RUNNER, ex))]
+        missing = [line.split()[-1] for line in result.stdout.splitlines()
+                   if line.startswith("MISSING")]
+        if missing:
+            return [Finding(
+                WARN, "toolchains",
+                "not on PATH inside %s: %s" % (RUNNER, ", ".join(missing)),
+                "rebuild the image: bash %s" % paths.script("build.sh"))]
+        return [Finding(
+            OK, "toolchains",
+            "all of %s answer inside %s" % (", ".join(TOOLCHAIN_PROBE), RUNNER))]
+
+    @staticmethod
+    def check_allowlist(paths):
+        """Does proxy/allowlist.txt exist, and how many hostnames are in it."""
+        example = paths.allowlist + ".example"
+        if not os.path.isfile(paths.allowlist):
+            return [Finding(
+                FAULT, "egress allowlist",
+                "no allowlist at %s; the proxy default-denies, so every "
+                "hostname the runner reaches for will be refused"
+                % paths.allowlist,
+                "cp %s %s then bash %s sync"
+                % (example, paths.allowlist, paths.script("allow.sh")))]
+        try:
+            with open(paths.allowlist, "r") as handle:
+                hosts = [ln.strip() for ln in handle
+                         if ln.strip() and not ln.strip().startswith("#")]
+        except OSError as ex:
+            return [Finding(
+                FAULT, "egress allowlist",
+                "%s exists but cannot be read: %s" % (paths.allowlist, ex),
+                "check permissions on %s" % paths.allowlist)]
+        if not hosts:
+            return [Finding(
+                WARN, "egress allowlist",
+                "%s has no hostnames in it, so the proxy refuses everything"
+                % paths.allowlist,
+                "bash %s add <hostname>" % paths.script("allow.sh"))]
+        return [Finding(
+            OK, "egress allowlist",
+            "%d hostname(s) allowed, in %s" % (len(hosts), paths.allowlist),
+            "bash %s list, or bash %s denied to see what was refused"
+            % (paths.script("allow.sh"), paths.script("allow.sh")))]
+
+    @staticmethod
+    def check_disk(paths):
+        """Free space where agent/out lives, and /work headroom last recorded."""
+        found = []
+        if not os.path.isdir(paths.out):
+            found.append(Finding(
+                FAULT, "agent/out",
+                "no out directory at %s - a lane's products have nowhere to "
+                "land" % paths.out,
+                "bash %s" % paths.script("up.sh")))
+        else:
+            usage = shutil.disk_usage(paths.out)
+            free_gb = usage.free / (1024.0 ** 3)
+            if free_gb < 2:
+                severity, remedy = FAULT, ("free space before the next run; a "
+                                           "lane that fills this disk stops "
+                                           "the host, not just the sandbox")
+            elif free_gb < 10:
+                severity, remedy = WARN, "consider pruning %s" % paths.out
+            else:
+                severity, remedy = OK, ""
+            found.append(Finding(
+                severity, "agent/out free space",
+                "%.1f GB free on the filesystem holding %s (%.0f%% of it used)"
+                % (free_gb, paths.out,
+                   100.0 * usage.used / max(usage.total, 1)),
+                remedy))
+            products = [e for e in os.listdir(paths.out)
+                        if not e.startswith(".")]
+            found.append(Finding(
+                NOTE, "agent/out contents",
+                "%d entr(y/ies) in %s; nothing prunes this automatically"
+                % (len(products), paths.out)))
+
+        statuses = LaneStatus.read_all(paths)
+        headroom = ""
+        for one in statuses:
+            headroom = one.fields.get("work_free_mb_after") or \
+                one.fields.get("work_free_mb_before") or ""
+            if headroom:
+                found.append(Finding(
+                    NOTE, "/work headroom",
+                    "the most recent lane (%s) recorded %s MB free in the "
+                    "container's /work tmpfs" % (one.name, headroom),
+                    "the cap is set by --tmpfs /work in %s and Tmpfs= in %s"
+                    % (paths.script("up.sh"), paths.quadlet_runner)))
+                break
+        if not headroom:
+            found.append(Finding(
+                NOTE, "/work headroom",
+                "no lane in %s has recorded /work headroom yet" % paths.status))
+        return found
+
+    def report(self):
+        """Render self.findings as a pipe table. Returns the exit code."""
+        ordered = sorted(self.findings,
+                         key=lambda f: SEVERITY_ORDER.get(f.severity, 9))
+        emit_table(["severity", "check", "what was seen", "what to do"],
+                   [f.row() for f in ordered],
+                   "  (no findings at all - that itself is suspicious)")
+        counts = {}
+        for one in ordered:
+            counts[one.severity] = counts.get(one.severity, 0) + 1
+        print()
+        print("  " + ", ".join("%d %s" % (counts[s], s)
+                               for s in (FAULT, WARN, NOTE, OK)
+                               if s in counts))
+        faults = counts.get(FAULT, 0)
+        if faults:
+            print("  exit 1 - %d real fault(s) above." % faults)
+        else:
+            print("  exit 0 - no real faults. WARN and NOTE are for reading, "
+                  "not for stopping.")
+        return 1 if faults else 0
+
+
+# ---- module functions ---------------------------------------------------
+
+def self_root():
+    """The directory this file lives in.
+
+    New in Airlock. usage() prints example commands, and an example
+    carrying one machine's home directory is exactly the public-
+    readiness defect this repo exists to remove. Help text is output, so
+    it cannot be fixed by configuration - it has to be computed.
+    """
+    return os.path.dirname(os.path.realpath(__file__))
+
+
+def _fmt_number(value):
+    """An integer if it is one, else a plain decimal. No trailing .0 noise."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if number == int(number):
+        return str(int(number))
+    return ("%.2f" % number).rstrip("0").rstrip(".")
+
+
+def _shebang_interpreter(first_line):
+    """The command a shebang actually names, ignoring `env` and flags."""
+    parts = [p for p in first_line[2:].split() if not p.startswith("-")]
+    for part in parts:
+        base = os.path.basename(part)
+        if base != "env":
+            return base
+    return ""
+
+
+def _grep_number(path, pattern):
+    """The first numeric capture of `pattern` in `path`, or None."""
+    try:
+        with open(path, "r") as handle:
+            match = re.search(pattern, handle.read())
+    except OSError:
+        return None
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _granted_cores():
+    """Cores podman actually gave sandbox-runner, or None."""
+    nano = podman_inspect(RUNNER, "{{.HostConfig.NanoCpus}}")
+    if nano and nano.isdigit() and int(nano) > 0:
+        return int(nano) / 1e9
+    quota = podman_inspect(RUNNER, "{{.HostConfig.CpuQuota}}")
+    period = podman_inspect(RUNNER, "{{.HostConfig.CpuPeriod}}")
+    try:
+        if quota and period and int(quota) > 0 and int(period) > 0:
+            return int(quota) / float(period)
+    except ValueError:
+        return None
+    return None
+
+
+def emit_table(headers, rows, empty_note="  (none)"):
+    """Print a markdown pipe table, or a plain note when there are no rows."""
+    if not rows:
+        print(empty_note)
+        return
+    def cell(value):
+        return str(value).replace("|", "\\|").replace("\n", " ")
+    print("| " + " | ".join(cell(h) for h in headers) + " |")
+    print("|" + "|".join("---" for _ in headers) + "|")
+    for row in rows:
+        print("| " + " | ".join(cell(c) for c in row) + " |")
+
+
+def delegate(paths, script_name, args):
+    """Run one of this repo's shell scripts and return its exit code.
+
+    up / down / allow go through here so podman flags stay spelled once,
+    in the shell script that already spells them.
+    """
+    target = paths.script(script_name)
+    if not os.path.isfile(target):
+        print("REFUSE: no such script: %s" % target, file=sys.stderr)
+        print("        this CLI never spells podman flags itself; it runs "
+              "that file.", file=sys.stderr)
+        return 2
+    command = ["bash", target] + list(args)
+    print("running: %s" % " ".join(command))
+    print("(this CLI delegates so container flags have one source of truth: "
+          "%s)" % target)
+    print()
+    # The shell script writes straight to fd 1; flush first or our own header
+    # arrives after its output.
+    sys.stdout.flush()
+    try:
+        return subprocess.call(command, cwd=paths.root)
+    except OSError as ex:
+        print("REFUSE: could not run %s: %s" % (target, ex), file=sys.stderr)
+        return 2
+
+
+def podman_inspect(container, template):
+    """One `podman inspect --format` value, or None if it cannot be had."""
+    if shutil.which("podman") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["podman", "inspect", "--format", template, container],
+            capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip()
+
+
+def up(paths, args):
+    """airlock up - delegate to up.sh."""
+    return delegate(paths, "up.sh", args)
+
+
+def down(paths, args):
+    """airlock down - delegate to down.sh."""
+    return delegate(paths, "down.sh", args)
+
+
+def submit(paths, args):
+    """airlock submit - validate, decide the batch, then drop."""
+    lane_paths, label, weight = [], None, None
+    no_batch = new_batch = dry_run = False
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--batch":
+            index += 1
+            if index >= len(args):
+                print("REFUSE: --batch needs a label", file=sys.stderr)
+                return 2
+            label = args[index]
+        elif token == "--no-batch":
+            no_batch = True
+        elif token == "--new-batch":
+            new_batch = True
+        elif token == "--weight":
+            index += 1
+            if index >= len(args):
+                print("REFUSE: --weight needs a number", file=sys.stderr)
+                return 2
+            weight = args[index]
+        elif token == "--dry-run":
+            dry_run = True
+        elif token.startswith("-"):
+            print("REFUSE: unknown flag for submit: %s" % token,
+                  file=sys.stderr)
+            return 2
+        else:
+            lane_paths.append(token)
+        index += 1
+
+    if len(lane_paths) != 1:
+        print("REFUSE: submit takes exactly one lane file, got %d"
+              % len(lane_paths), file=sys.stderr)
+        print("        usage: airlock submit <lane.sh> "
+              "(--batch <label> [--weight N] | --no-batch)", file=sys.stderr)
+        return 2
+
+    if label and no_batch:
+        print("REFUSE: --batch and --no-batch contradict each other.",
+              file=sys.stderr)
+        return 2
+    if not label and not no_batch:
+        print("REFUSE: no batch decision.", file=sys.stderr)
+        print("        Every lane needs a denominator or an explicit refusal "
+              "of one, so nothing is dropped silently again.", file=sys.stderr)
+        print("        Give --batch <label> [--weight N] to write or extend "
+              "%s," % paths.batch_file, file=sys.stderr)
+        print("        or --no-batch to drop this lane with no manifest.",
+              file=sys.stderr)
+        return 2
+    if weight is not None:
+        try:
+            float(weight)
+        except ValueError:
+            print("REFUSE: --weight must be a number, got %r" % weight,
+                  file=sys.stderr)
+            return 2
+
+    lane = Lane(lane_paths[0], float(weight) if weight is not None else 1)
+    findings = lane.validate(paths)
+    if label and weight is None:
+        findings.append(Finding(
+            WARN, lane.name,
+            "no --weight given, so this lane counts as 1 against the batch "
+            "total; a big lane and a tiny lane then weigh the same in %s"
+            % paths.batch_file,
+            "give --weight <n>, in whatever unit the other lanes of this "
+            "batch use"))
+
+    refusals = [f for f in findings if f.severity == REFUSE]
+    warnings = [f for f in findings if f.severity == WARN]
+
+    if refusals:
+        print("REFUSED: %s was not dropped." % lane.source_path)
+        print()
+        for one in refusals:
+            print(one.line())
+        if warnings:
+            print()
+            print("also noticed (would not on their own have refused):")
+            for one in warnings:
+                print(one.line())
+        return 1
+
+    for one in warnings:
+        print(one.line())
+    if warnings:
+        print()
+
+    # ---- the batch decision ---------------------------------------------
+    if label:
+        existing = Batch.read(paths)
+        if existing is not None and existing.label != label and not new_batch:
+            print("REFUSED: %s already carries the batch '%s', not '%s'."
+                  % (paths.batch_file, existing.label, label), file=sys.stderr)
+            print("         %s" % existing.summary(), file=sys.stderr)
+            print("         Use --batch %s to join it, or --new-batch to "
+                  "replace the manifest deliberately." % existing.label,
+                  file=sys.stderr)
+            return 1
+        if existing is None or new_batch:
+            stamp = datetime.now(timezone.utc)
+            existing = Batch(
+                "batch-" + stamp.strftime("%Y%m%dT%H%M%SZ"), label,
+                stamp.isoformat(timespec="seconds").replace("+00:00",
+                                                            "+00:00"),
+                [])
+            action = "wrote"
+        else:
+            action = "extended"
+        existing.add_lane(lane.name, lane.weight)
+        if dry_run:
+            print("dry run: would have %s %s" % (action, paths.batch_file))
+        else:
+            existing.write(paths)
+            print("%s %s" % (action, paths.batch_file))
+        print("  " + existing.summary())
+    else:
+        print("no batch: this lane is dropped with no manifest, so "
+              "progress.sh has no denominator for it.")
+        print("  (%s is left exactly as it is)" % paths.batch_file)
+
+    if dry_run:
+        print()
+        print("dry run: %s would have been dropped as %s"
+              % (lane.source_path, os.path.join(paths.drop, lane.name)))
+        return 0
+
+    final = lane.drop_into(paths)
+    print()
+    print("dropped %s" % final)
+    print("  from:     %s" % lane.source_path)
+    print("  written hidden as %s first, then renamed - the daemon never "
+          "sees a partial file" % os.path.join(paths.drop, "." + lane.name))
+    print("  poll:     %s"
+          % os.path.join(paths.status, lane.name + ".status"))
+    print("  log:      %s/<stamp>__%s.log" % (paths.logs, lane.name))
+    print("  products: %s" % paths.out)
+    print()
+    print("  airlock status %s" % lane.name)
+    print("  full detail: bash %s   (-w to refresh)"
+          % paths.script("progress.sh"))
+    return 0
+
+
+def _render_status(paths, name, limit):
+    """The body of `status`, shared with `watch` so both render identically."""
+    manifest = Batch.read(paths)
+    if manifest is not None:
+        print("  " + manifest.summary())
+        print("  manifest: %s" % paths.batch_file)
+    else:
+        print("  no batch manifest at %s" % paths.batch_file)
+    print()
+
+    if name:
+        one = LaneStatus.read(paths, name)
+        if one is None:
+            print("  no status for '%s' at %s"
+                  % (name, os.path.join(paths.status, name + ".status")))
+            queued = os.path.join(paths.drop, name)
+            if os.path.exists(queued):
+                print("  it is still queued at %s (the daemon has not "
+                      "started it)" % queued)
+                return 0
+            print("  and it is not queued at %s either" % queued)
+            return 1
+        print("  lane:     %s" % one.name)
+        print("  state:    %s" % one.display_state())
+        if one.display_state() == "ABORT":
+            print("            the daemon recorded this as %r; ABORT is this "
+                  "program's word for the outcome where the operating system "
+                  "stopped the run" % one.verdict)
+        print("  exit:     %s" % (one.exit_code or "-"))
+        print("  started:  %s" % (one.started or "-"))
+        print("  elapsed:  %s" % ((one.elapsed_s + "s") if one.elapsed_s
+                                  else "-"))
+        progress = one.progress_line(paths)
+        print("  progress: %s" % (progress or "no [n/total] line in its log"))
+        host_log = one.host_log(paths)
+        print("  log:      %s" % (host_log or
+                                  "%s (as the container names it; not on the "
+                                  "host)" % one.log_path))
+        print("  status:   %s"
+              % os.path.join(paths.status, one.name + ".status"))
+        print()
+        print("  full detail: bash %s   (-w to refresh)"
+              % paths.script("progress.sh"))
+        return 0
+
+    queued = []
+    if os.path.isdir(paths.drop):
+        queued = sorted(e for e in os.listdir(paths.drop)
+                        if e.endswith(".sh") and not e.startswith("."))
+    print("queued in %s" % paths.drop)
+    emit_table(["lane"], [[q] for q in queued], "  (none)")
+    print()
+
+    everything = LaneStatus.read_all(paths)
+    running = [s for s in everything if s.state == "running"]
+    print("running")
+    emit_table(["lane", "state", "exit", "elapsed", "progress"],
+               [s.row(paths) for s in running], "  (nothing running)")
+    print()
+
+    recent = [s for s in everything if s.state != "running"][:limit]
+    print("most recent %d finished, out of %d in %s"
+          % (len(recent), len(everything), paths.status))
+    emit_table(["lane", "state", "exit", "elapsed", "progress"],
+               [s.row(paths) for s in recent], "  (no status files)")
+    print()
+    print("  one lane in full: airlock status <lane.sh>")
+    print("  full detail: bash %s   (-w to refresh)"
+          % paths.script("progress.sh"))
+    return 0
+
+
+def status(paths, args):
+    """airlock status - compact view of one lane or all."""
+    name, limit = "", 10
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--limit":
+            index += 1
+            if index >= len(args) or not args[index].isdigit():
+                print("REFUSE: --limit needs a whole number", file=sys.stderr)
+                return 2
+            limit = int(args[index])
+        elif token == "--all":
+            name = ""
+        elif token.startswith("-"):
+            print("REFUSE: unknown flag for status: %s" % token,
+                  file=sys.stderr)
+            return 2
+        else:
+            name = token
+        index += 1
+    return _render_status(paths, name, limit)
+
+
+def watch(paths, args):
+    """airlock watch - status on a timer."""
+    interval, rest = 2.0, []
+    index = 0
+    while index < len(args):
+        if args[index] == "--interval":
+            index += 1
+            if index >= len(args):
+                print("REFUSE: --interval needs a number of seconds",
+                      file=sys.stderr)
+                return 2
+            try:
+                interval = float(args[index])
+            except ValueError:
+                print("REFUSE: --interval must be a number, got %r"
+                      % args[index], file=sys.stderr)
+                return 2
+        else:
+            rest.append(args[index])
+        index += 1
+    try:
+        while True:
+            sys.stdout.write("\033[2J\033[H")
+            print("%s   refresh %ss   ctrl-c to stop"
+                  % (datetime.now().isoformat(timespec="seconds"), interval))
+            print()
+            status(paths, rest)
+            sys.stdout.flush()
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print()
+        return 0
+
+
+def allow(paths, args):
+    """airlock allow - delegate to allow.sh."""
+    if not args:
+        print("REFUSE: allow needs a subcommand.", file=sys.stderr)
+        print("        list | add <host>... | remove <host>... | sync | "
+              "denied", file=sys.stderr)
+        print("        it is %s that does the work; this only passes it on."
+              % paths.script("allow.sh"), file=sys.stderr)
+        return 2
+    return delegate(paths, "allow.sh", args)
+
+
+def doctor(paths, args):
+    """airlock doctor - run every check, report, exit non-zero on faults."""
+    if args:
+        print("REFUSE: doctor takes no arguments, got %s" % " ".join(args),
+              file=sys.stderr)
+        return 2
+    print("doctor: %s" % paths.root)
+    print()
+    physician = Doctor()
+    physician.run(paths)
+    return physician.report()
+
+
+def usage():
+    """The help text. Pipe tables and plain lines, never aligned columns."""
+    root = self_root()
+    me = os.path.join(root, "airlock")
+    print("airlock - the command-line front door to an Airlock sandbox.")
+    print()
+    print("Airlock runs a bash script inside a container with a capped cpu")
+    print("share, capped memory, size-capped scratch filesystems, every")
+    print("capability dropped, and no route to the internet except a proxy")
+    print("that permits only hostnames declared in advance.")
+    print()
+    print("The file protocol underneath stays the truth: agent/drop ->")
+    print("agent/status -> agent/logs -> agent/out. This program checks")
+    print("before it writes. A hand-drop, and every shell script in this")
+    print("repo, keep working with or without it.")
+    print()
+    print("this repo: %s" % root)
+    print()
+    print("usage:")
+    print("  %s <command> [...]" % me)
+    print("  python3 %s <command> [...]" % me)
+    print()
+    print("commands")
+    emit_table(
+        ["command", "what it does"],
+        [["up [...]",
+          "start the sandbox - delegates to up.sh, so --cpus/--memory/tmpfs "
+          "caps have one spelling"],
+         ["down [--networks]",
+          "stop and remove the containers - delegates to down.sh"],
+         ["submit <lane.sh> ...",
+          "validate a lane, decide its batch, then drop it into agent/drop"],
+         ["status [<lane.sh>]",
+          "compact view of one lane, or of the queue and recent runs"],
+         ["watch [--interval N]",
+          "the same view, refreshed (default every 2s)"],
+         ["allow <sub> [...]",
+          "manage the egress allowlist - delegates to allow.sh"],
+         ["doctor",
+          "check podman, cores, drop clutter, toolchains, allowlist, disk"],
+         ["help", "this text"]])
+    print()
+    print("submit flags")
+    emit_table(
+        ["flag", "what it means"],
+        [["--batch <label>",
+          "write or extend agent/batch.json under this label. Required, "
+          "unless --no-batch"],
+         ["--no-batch",
+          "drop with no manifest, deliberately. progress.sh then has no "
+          "denominator for this lane"],
+         ["--weight <n>",
+          "this lane's weight in the batch, in whatever unit the batch uses. "
+          "Defaults to 1, with a warning"],
+         ["--new-batch",
+          "replace an existing manifest that carries a different label"],
+         ["--dry-run",
+          "validate and say what would happen; write nothing"]])
+    print()
+    print("submit refuses, by name, with a non-zero exit, when:")
+    print("  - the lane file does not exist")
+    print("  - the lane file is not readable")
+    print("  - its name does not end in .sh")
+    print("  - its name starts with '.'")
+    print("  - there is no drop directory to put it in")
+    print("  - a lane of that name is already queued in agent/drop")
+    print("  - a lane of that name is already archived in agent/drop/.done")
+    print("  - the file has no shebang")
+    print("  - no batch decision was made (neither --batch nor --no-batch)")
+    print("  - --batch names a different label than agent/batch.json already")
+    print("    carries, without --new-batch")
+    print()
+    print("submit warns, and drops anyway, when:")
+    print("  - the lane prints no [n/total]-style progress line")
+    print("  - the shebang is not a shell (the daemon execs /bin/bash "
+          "regardless)")
+    print("  - the file has CRLF line endings")
+    print("  - --batch was given with no --weight")
+    print()
+    print("global flags")
+    emit_table(
+        ["flag", "what it means"],
+        [["--root <dir>",
+          "act on a different Airlock tree. Also AIRLOCK_ROOT, and "
+          "SANDBOX_DESIGN_ROOT after it for anyone migrating from "
+          "SandboxDesign. Precedence: --root, then AIRLOCK_ROOT, then "
+          "SANDBOX_DESIGN_ROOT, then the directory this file lives in"],
+         ["--help, -h, help", "this text"]])
+    print()
+    print("what this program does NOT do:")
+    print("  - it does not replace submit.sh. submit.sh moves a lane with")
+    print("    podman cp and is right when you have podman; this writes the")
+    print("    same hidden-then-rename hand-drop, which needs no podman.")
+    print("  - it does not reimplement progress.sh. For the full view, "
+          "including")
+    print("    live processes inside the container:")
+    print("      bash %s     one snapshot" % os.path.join(root, "progress.sh"))
+    print("      bash %s -w  refreshing" % os.path.join(root, "progress.sh"))
+    return 0
+
+
+def main(argv):
+    """Parse the global flags, dispatch one command, return an exit code."""
+    args, root_flag = [], None
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "--root":
+            index += 1
+            if index >= len(argv):
+                print("REFUSE: --root needs a directory", file=sys.stderr)
+                return 2
+            root_flag = argv[index]
+        elif token in ("--help", "-h"):
+            return usage()
+        else:
+            args.append(token)
+        index += 1
+
+    if not args:
+        usage()
+        return 2
+
+    command, rest = args[0], args[1:]
+    if command == "help":
+        return usage()
+
+    if root_flag is not None and not os.path.isdir(root_flag):
+        print("REFUSE: --root is not a directory: %s"
+              % os.path.abspath(root_flag), file=sys.stderr)
+        return 2
+    paths = Paths.resolve(root_flag)
+    if not os.path.isdir(paths.root):
+        print("REFUSE: no Airlock tree at %s" % paths.root,
+              file=sys.stderr)
+        return 2
+
+    table = {"up": up, "down": down, "submit": submit, "status": status,
+             "watch": watch, "allow": allow, "doctor": doctor}
+    if command not in table:
+        print("REFUSE: no such command: %s" % command, file=sys.stderr)
+        print("        known: %s" % ", ".join(sorted(table)), file=sys.stderr)
+        print("        airlock --help", file=sys.stderr)
+        return 2
+    return table[command](paths, rest)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
