@@ -94,9 +94,28 @@ else
 fi
 
 # ---- runner --------------------------------------------------------------
+# An existing container is STARTED, never rebound: podman fixes a container's
+# binds when it is created. So before reusing one, check that it is bound to
+# THIS checkout's agent folders.
+#
+# The failure this exists to stop, seen 2026-08-22: a runner created by a
+# different checkout of this design kept watching that checkout's agent/drop.
+# podman reported it running, its toolchains answered, and lanes queued here
+# were simply never seen — for twenty minutes, with no error anywhere.
 if podman container exists sandbox-runner; then
+    bound_drop=$(podman inspect sandbox-runner \
+        --format '{{range .Mounts}}{{if eq .Destination "/drop"}}{{.Source}}{{end}}{{end}}' \
+        2>/dev/null || echo "")
+    if [ -n "$bound_drop" ] && [ "$bound_drop" != "$AGENT_DIR/drop" ]; then
+        echo "  REFUSING to reuse sandbox-runner: it is bound to another tree." >&2
+        echo "    its /drop:  $bound_drop" >&2
+        echo "    this repo:  $AGENT_DIR/drop" >&2
+        echo "    Lanes queued here would never be seen. Remove it and rerun:" >&2
+        echo "      podman rm -f sandbox-runner sandbox-proxy && bash $0" >&2
+        exit 1
+    fi
     podman start sandbox-runner >/dev/null
-    echo "  sandbox-runner already existed; started"
+    echo "  sandbox-runner already existed; started (bound to $AGENT_DIR/drop)"
 else
     # Host binds for the agent lane; named volume only for /persist, which is
     # the one place state is MEANT to survive between runs.
