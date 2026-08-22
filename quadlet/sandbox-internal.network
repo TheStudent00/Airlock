@@ -1,0 +1,8 @@
+# The runner's only network. Internal=true means podman installs no route
+# out of it, so nothing on this network can reach the internet directly.
+[Unit]
+Description=Sandbox internal network (no egress)
+
+[Network]
+NetworkName=sandbox-internal
+Internal=true

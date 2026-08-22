@@ -1,0 +1,27 @@
+# Allowlist forward proxy. Attached to BOTH networks: it is the only
+# bridge between the runner and the internet.
+[Unit]
+Description=Sandbox allowlist proxy
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=sandbox-proxy
+Image=localhost/sandbox-proxy:latest
+Network=sandbox-egress.network
+Network=sandbox-internal.network
+
+Memory=512m
+PidsLimit=256
+DropCapability=ALL
+AddCapability=SETUID
+AddCapability=SETGID
+NoNewPrivileges=true
+PodmanArgs=--cpus=1
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,69 @@
+# The hot-folder daemon. On the internal network only — its sole reachable
+# peer is sandbox-proxy:3128.
+[Unit]
+Description=Sandbox script runner (hot-folder daemon)
+Requires=sandbox-proxy.service
+After=sandbox-proxy.service
+
+[Container]
+ContainerName=sandbox-runner
+Image=localhost/sandbox-runner:latest
+Network=sandbox-internal.network
+
+# Quadlet generates `podman run --rm`, so the container is DESTROYED on
+# every stop and restart. Everything that must outlive a restart is either a
+# host bind or a named volume below.
+#
+# AGENT LANE — GENERATED, do not hand-edit.
+#
+# An agent session may be able to write files on the host but not run
+# podman. Binding these four directories makes the hot folder reachable by
+# a plain file write: the session writes agent/drop/x.sh, close_write
+# fires, and it reads agent/status/x.sh.status and agent/out/ back — no
+# shell needed on the session's side. These replace named volumes, whose
+# storage sits outside any folder a session can see.
+#
+# Everything between the two markers below is written by
+# ./install_quadlet.sh from THIS REPO'S OWN LOCATION when it installs the
+# unit into ~/.config/containers/systemd/. The copy in the repo keeps the
+# markers empty, because Airlock must carry no assumption about where it
+# has been cloned.
+# >>> AGENT LANE
+# <<< AGENT LANE
+
+# CONFIGURED MOUNTS — generated, do not hand-edit.
+#
+# Everything between the two markers below is written by
+# ./install_quadlet.sh from ./mounts.conf when it installs this unit into
+# ~/.config/containers/systemd/. The copy in the repo keeps the markers
+# empty, because this repo is a project-agnostic TEMPLATE: which
+# directories a machine exposes is that machine's configuration, not the
+# tool's. See mounts.conf.example.
+#
+# Default is read-only. Products go to /out, and the caller places them —
+# that is what makes "a run cannot damage the original" true rather than
+# hoped.
+# >>> MOUNTS
+# <<< MOUNTS
+
+# The one place state is MEANT to survive between runs (opt-in; see README).
+Volume=sandbox-persist:/persist
+
+# /work is a size-capped tmpfs. A run that exceeds the cap fails loudly with
+# ENOSPC inside the container instead of filling the host disk — which is how a
+# generated-file extraction wedged a session on 2026-07-30. Raising it is a
+# deliberate act, not a default. Memory covers the tmpfs plus process headroom.
+Memory=12g
+PidsLimit=2048
+DropCapability=ALL
+NoNewPrivileges=true
+Tmpfs=/tmp:rw,nosuid,nodev,size=2g
+Tmpfs=/work:rw,nosuid,nodev,size=4g
+PodmanArgs=--cpus=6
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

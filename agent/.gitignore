@@ -1,0 +1,6 @@
+# Per-batch manifest — runtime state written by batch.sh before a run,
+# read by progress.sh during it. Same convention as agent/status/ and
+# agent/logs/: the mechanism (batch.sh, progress.sh) is tracked, what a
+# live run writes is not.
+batch.json
+.batch.json.tmp.*

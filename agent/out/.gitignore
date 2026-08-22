@@ -1,0 +1,4 @@
+# Track the directory, not run products. Anything worth keeping is placed
+# into its real project by the session that read it.
+*
+!.gitignore

@@ -1,0 +1,21 @@
+# Allowlist forward proxy.
+#
+# This is the ONLY thing the runner container can reach. It relays
+# outbound requests, and only to hostnames listed in allowlist.txt.
+#
+# It never decrypts TLS. For an HTTPS request the client first sends a
+# plain-text "CONNECT pypi.org:443" line; squid matches that hostname
+# against the allowlist and either opens a blind tunnel or refuses.
+
+FROM docker.io/library/ubuntu:26.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends squid \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY proxy/squid.conf /etc/squid/squid.conf
+COPY proxy/allowlist.txt /etc/squid/allowlist.txt
+
+RUN mkdir -p /var/spool/squid && chown -R proxy:proxy /var/spool/squid /var/log/squid
+EXPOSE 3128
+CMD ["squid", "-N", "-d", "1", "-f", "/etc/squid/squid.conf"]
