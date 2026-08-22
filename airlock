@@ -52,7 +52,67 @@ PROXY = "sandbox-proxy"
 # A lane is expected to print its own progress as [n/total]; progress.sh
 # reads exactly that to compute the current lane's percentage and ETA.
 PROGRESS_RUN = re.compile(r"\[\s*\d+\s*/\s*\d+\s*\]")
+PROGRESS_CAPTURE = re.compile(r"\[\s*(\d+)\s*/\s*(\d+)\s*\]")
 PROGRESS_TEMPLATE = re.compile(r"\[[^\]\n]*[$%][^\]\n]*/[^\]\n]*\]")
+
+
+def _parse_iso(stamp):
+    """An ISO-8601 timestamp (`started`, `created`) -> a datetime, or
+    None if absent or unreadable. Never raises.
+
+    `daemon/watcher.py` writes its own `+00:00` offset, which every
+    Python version here parses. A trailing `Z` is the other common
+    spelling of the same offset (`date -u +%FT%TZ` writes it, and a
+    hand-written manifest might too) — Python's `fromisoformat` only
+    accepts it from 3.11 on, so it is normalised by hand rather than
+    assumed away.
+    """
+    if not stamp:
+        return None
+    if stamp.endswith("Z"):
+        stamp = stamp[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(stamp)
+    except ValueError:
+        return None
+
+
+def _fmt_hms(seconds):
+    """SECONDS -> "H:MM:SS", or "n/a" for None or a negative estimate."""
+    if seconds is None or seconds < 0:
+        return "n/a"
+    seconds = int(seconds)
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return "%02d:%02d:%02d" % (h, m, s)
+
+
+def _fmt_weight(value):
+    """VALUE -> an integer string if it is one, else two decimals."""
+    value = float(value or 0)
+    if value == int(value):
+        return "%d" % int(value)
+    return "%.2f" % value
+
+
+def _compute_pct_eta(done, total, elapsed_s):
+    """(done, total, elapsed_s) -> (pct_string, eta_seconds_or_None).
+
+    Same formula progress.sh's `compute_pct_eta` uses, so the two never
+    disagree: percentage is always answerable from done/total; the ETA
+    answers None (progress.sh's "NA") rather than guess from too little
+    throughput — under 5s elapsed, or nothing done yet.
+    """
+    total = float(total or 0)
+    done = float(done or 0)
+    pct = "%.1f" % ((done / total) * 100 if total > 0 else 0.0)
+    if elapsed_s is None or elapsed_s < 5 or done <= 0:
+        return pct, None
+    rate = done / elapsed_s
+    remaining = max(total - done, 0.0)
+    if rate <= 0:
+        return pct, None
+    return pct, remaining / rate
 
 SHELL_INTERPRETERS = ("bash", "sh", "dash", "ksh", "zsh")
 
@@ -329,6 +389,81 @@ class Batch:
         return ("batch '%s' (id %s, created %s): %d lane(s), total weight %s"
                 % (self.label, self.batch_id, self.created,
                    len(self.lanes), _fmt_number(total)))
+
+    def progress_summary(self, paths):
+        """Overall completion by weight, plus the running lane's own
+        percentage and a per-lane ETA — the same block `progress.sh`
+        prints first, computed here from the SAME formula
+        (`_compute_pct_eta`) so the two views never disagree.
+
+        Answers a list of print-ready lines. Never raises: a lane with
+        no status file yet is simply not counted as done.
+        """
+        lines = []
+        total_w = sum(float(w or 0) for _, w in self.lanes)
+        done_w = 0.0
+        lanes_done = 0
+        running = None          # (name, weight, LaneStatus)
+        for name, weight in self.lanes:
+            one = LaneStatus.read(paths, name)
+            if one is None:
+                continue
+            if one.state == "done":
+                done_w += float(weight or 0)
+                lanes_done += 1
+            elif one.state == "running":
+                running = (name, weight, one)
+
+        created_at = _parse_iso(self.created)
+        elapsed_s = None
+        if created_at is not None:
+            elapsed_s = (datetime.now(created_at.tzinfo) - created_at) \
+                .total_seconds()
+            elapsed_s = max(elapsed_s, 0.0)
+        pct, eta_s = _compute_pct_eta(done_w, total_w, elapsed_s)
+
+        lines.append("  batch:    %s  (id %s)"
+                     % (self.label or "(unlabeled)",
+                        self.batch_id or "unknown"))
+        lines.append("  overall:  %d/%d lanes done   weight %s/%s  (%s%% by weight)"
+                     % (lanes_done, len(self.lanes), _fmt_weight(done_w),
+                        _fmt_weight(total_w), pct))
+        lines.append("  elapsed:  %s"
+                     % (_fmt_hms(elapsed_s) if elapsed_s is not None
+                        else "n/a (created timestamp missing or unreadable)"))
+        if lanes_done == len(self.lanes) and self.lanes:
+            lines.append("  ETA all:  already complete")
+            lines.append("  status:   batch complete")
+        elif eta_s is None:
+            lines.append("  ETA all:  not enough data yet (estimate needs "
+                         "at least one finished lane and 5s+ elapsed)")
+        else:
+            lines.append("  ETA all:  ~%s remaining  (estimate, from "
+                         "throughput so far)" % _fmt_hms(eta_s))
+
+        if running is not None:
+            name, weight, one = running
+            mark = one.progress_line(paths)
+            captured = PROGRESS_CAPTURE.search(mark) if mark else None
+            if captured:
+                n, tot = int(captured.group(1)), int(captured.group(2))
+                started_at = _parse_iso(one.started)
+                lane_elapsed = None
+                if started_at is not None:
+                    lane_elapsed = (datetime.now(started_at.tzinfo)
+                                    - started_at).total_seconds()
+                    lane_elapsed = max(lane_elapsed, 0.0)
+                lane_pct, lane_eta = _compute_pct_eta(n, tot, lane_elapsed)
+                lines.append("  current:  %s  %d/%d  (%s%%)"
+                             % (name, n, tot, lane_pct))
+                lines.append("  ETA lane: not enough data yet" if lane_eta
+                             is None else
+                             "  ETA lane: ~%s remaining  (estimate)"
+                             % _fmt_hms(lane_eta))
+            else:
+                lines.append("  current:  %s  (running, no [n/total] "
+                             "progress line in its log yet)" % name)
+        return lines
 
 
 class LaneStatus:
@@ -1032,11 +1167,14 @@ def submit(paths, args):
 def _render_status(paths, name, limit):
     """The body of `status`, shared with `watch` so both render identically."""
     manifest = Batch.read(paths)
+    print("batch summary")
     if manifest is not None:
-        print("  " + manifest.summary())
+        for line in manifest.progress_summary(paths):
+            print(line)
         print("  manifest: %s" % paths.batch_file)
     else:
-        print("  no batch manifest at %s" % paths.batch_file)
+        print("  no batch manifest at %s — showing all lanes below"
+              % paths.batch_file)
     print()
 
     if name:
