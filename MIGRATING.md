@@ -68,11 +68,11 @@ re-install for everyone migrating. See the warning below.
 
 | SandboxDesign | Airlock |
 |---|---|
-| `~/Programming/SandboxDesign/sandbox submit x.sh --batch b --weight 40` | `<airlock>/airlock submit x.sh --batch b --weight 40` |
-| `~/Programming/SandboxDesign/sandbox status x.sh` | `<airlock>/airlock status x.sh` |
-| `~/Programming/SandboxDesign/sandbox watch` | `<airlock>/airlock watch` |
-| `~/Programming/SandboxDesign/sandbox doctor` | `<airlock>/airlock doctor` |
-| `~/Programming/SandboxDesign/sandbox up` / `down` / `allow ...` | `<airlock>/airlock up` / `down` / `allow ...` |
+| `<sandboxdesign>/sandbox submit x.sh --batch b --weight 40` | `<airlock>/airlock submit x.sh --batch b --weight 40` |
+| `<sandboxdesign>/sandbox status x.sh` | `<airlock>/airlock status x.sh` |
+| `<sandboxdesign>/sandbox watch` | `<airlock>/airlock watch` |
+| `<sandboxdesign>/sandbox doctor` | `<airlock>/airlock doctor` |
+| `<sandboxdesign>/sandbox up` / `down` / `allow ...` | `<airlock>/airlock up` / `down` / `allow ...` |
 
 Every flag, every refusal, every exit code is the same.
 
@@ -96,7 +96,7 @@ future drift is still caught.
 ### 3. Where your project directories are declared
 
 `quadlet/sandbox-runner.container` in SandboxDesign hardcoded
-`Volume=%h/Programming/SandboxDesign/agent/drop:/drop` and three more.
+`Volume=%h/<sandboxdesign>/agent/drop:/drop` and three more.
 Airlock's copy carries an empty `# >>> AGENT LANE` marker block instead;
 `install_quadlet.sh` fills it from the repo's own location at install
 time. **If you use the systemd path, re-run the installer.**
@@ -112,7 +112,7 @@ gitignored. Copy yours across.
 - `create_github_repo.sh` and `git_commit_push.sh` — one person's host
   workflow, hardcoding one path.
 - SandboxDesign's `DevComms/` logs and captured run records. They stay
-  readable in `~/Programming/SandboxDesign`, which is not modified by
+  readable in `<sandboxdesign>`, which is not modified by
   this migration.
 
 ---
@@ -129,7 +129,7 @@ you are looking.
 Bring one down before bringing the other up:
 
 ```
-bash ~/Programming/SandboxDesign/down.sh
+bash <sandboxdesign>/down.sh
 bash <airlock>/up.sh
 ```
 
@@ -137,7 +137,7 @@ If you had installed the systemd units from SandboxDesign, remove them
 first — they carry the old hardcoded agent-lane paths:
 
 ```
-bash ~/Programming/SandboxDesign/install_quadlet.sh --remove
+bash <sandboxdesign>/install_quadlet.sh --remove
 bash <airlock>/install_quadlet.sh
 ```
 
@@ -147,14 +147,14 @@ bash <airlock>/install_quadlet.sh
 
 ```
 # 1. stop the old sandbox
-bash ~/Programming/SandboxDesign/down.sh
+bash <sandboxdesign>/down.sh
 # ...or, if it was under systemd:
-bash ~/Programming/SandboxDesign/install_quadlet.sh --remove
+bash <sandboxdesign>/install_quadlet.sh --remove
 
 # 2. carry your per-machine configuration across. Neither file is
 #    tracked in either repo, so nothing is overwritten by a pull.
-cp ~/Programming/SandboxDesign/mounts.conf          <airlock>/mounts.conf
-cp ~/Programming/SandboxDesign/proxy/allowlist.txt  <airlock>/proxy/allowlist.txt
+cp <sandboxdesign>/mounts.conf          <airlock>/mounts.conf
+cp <sandboxdesign>/proxy/allowlist.txt  <airlock>/proxy/allowlist.txt
 
 # 3. the images already exist and are unchanged; no rebuild is needed.
 #    Rebuild only if you want to, or if you never built them:
@@ -169,7 +169,7 @@ bash <airlock>/selftest.sh      # six checks, all should PASS
 export AIRLOCK_ROOT=<airlock>
 ```
 
-Nothing is copied out of `~/Programming/SandboxDesign/agent/`. Old logs,
+Nothing is copied out of `<sandboxdesign>/agent/`. Old logs,
 statuses and products stay where they are; Airlock starts with an empty
 lane. If you want an old batch's history, read it in place.
 
@@ -180,16 +180,16 @@ Search the project for the string `sandbox` used as a *command*, and for
 
 | what to look for | what to replace it with |
 |---|---|
-| `~/Programming/SandboxDesign/sandbox` | `$AIRLOCK_ROOT/airlock` |
-| `~/Programming/SandboxDesign/<script>.sh` | `$AIRLOCK_ROOT/<script>.sh` |
+| `<sandboxdesign>/sandbox` | `$AIRLOCK_ROOT/airlock` |
+| `<sandboxdesign>/<script>.sh` | `$AIRLOCK_ROOT/<script>.sh` |
 | `SANDBOX_DESIGN_ROOT=...` | `AIRLOCK_ROOT=...` (the old name still works) |
-| a hardcoded `~/Programming/SandboxDesign/agent/status/...` poll path | `$AIRLOCK_ROOT/agent/status/...` — the tail of the path is identical |
+| a hardcoded `<sandboxdesign>/agent/status/...` poll path | `$AIRLOCK_ROOT/agent/status/...` — the tail of the path is identical |
 
 Do **not** search-and-replace `sandbox-runner` or `sandbox-proxy`. Those
 names are unchanged on purpose.
 
 ## SandboxDesign is not retired
 
-`~/Programming/SandboxDesign` is untouched by this derivation. It still
+`<sandboxdesign>` is untouched by this derivation. It still
 works, and whether to retire it is the maintainer's call — see the
 "awaiting the maintainer" list at the foot of `DevComms/log_001_airlock_derivation.md`.

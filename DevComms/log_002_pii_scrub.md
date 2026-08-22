@@ -77,9 +77,11 @@ said:
 
 - Paths **inside this repo** became repo-relative: a table cell that read
   as an absolute path to `airlock` now reads `` `airlock` ``. Paths to
-  **other** repos became `~/Programming/<name>`.
+  **other** repos became a placeholder pairing a projects-directory name
+  with the repo name. The later tidiness pass recorded below drops the
+  projects-directory name too — see its section for why.
 - The one captured `--help` transcript keeps its shape — the program does
-  print a path there — rendered as `~/Programming/Airlock/...`.
+  print a path there — rendered as `<airlock>/...`.
 - Agent session mount paths had their sentences rewritten. The paragraph
   that existed only to explain the mount prefix now explains that the
   paths are shown in their `~` form and that the mount carried no meaning
@@ -342,3 +344,193 @@ deleting the repository.
    its first character, as this one was written; moving `DevComms/` out of
    the public repo entirely remains a defensible call and is the
    maintainer's to make.
+
+---
+
+## 2026-08-22, later — git helpers, and a disc-layout tidiness pass
+
+This is not a second PII incident. The maintainer's own framing, recorded
+here because it shapes what follows: naming this repo's directory layout
+gives away disc information for no benefit, and reads oddly to a stranger
+who does not keep their own repos the same way. Nothing below was a
+`scrub_check.sh` offender before this pass; everything below is tidiness.
+
+### §9 the two git-ignored helpers added
+
+Two scripts, both gitignored (see `.gitignore`), neither committed,
+neither run by this session — the maintainer runs them:
+
+- **`git_commit_push.sh`** — add, commit and push this repo, following
+  the same private-repo helper's pattern this line of work already uses
+  elsewhere: message priority is an explicit argument, then
+  `DevComms/next_commit_message.txt` (emptied after use), then a default;
+  stale git locks from an interrupted sandbox git are cleared first.
+  Because this repo is public, two refusals were added that the private
+  version does not carry, and neither can be skipped: `scrub_check.sh`
+  must pass before anything is staged, and the script refuses outright if
+  `git add -A` would pick up any file that is untracked and not
+  gitignored — the exact hole this log's §2 already describes. It only
+  ever fast-forwards; it does not force-push and does not rewrite
+  history. Justification: this is the one script actually requested, and
+  the public-repo refusals are what make it safe to hand to a routine
+  workflow.
+- **`git_status.sh`** — a read-only pre-flight. It reports what
+  `git status` sees, which files (if any) are untracked-and-unignored,
+  and the `scrub_check.sh` result, then states plainly whether
+  `git_commit_push.sh` would proceed or refuse. It runs no git command
+  that changes anything. Justification: seeing the refusal conditions
+  before running the script that enforces them is worth one small file;
+  it was kept to exactly what `git_commit_push.sh` already checks,
+  nothing more, so the two stay in sync by construction rather than by
+  discipline.
+
+No third script was added. A `git_status.sh`-style pre-flight and the
+commit-push driver cover the request; anything further (a log/diff
+viewer, a branch helper) was judged to be toolkit-building rather than
+what was asked for, and is left out.
+
+Both scripts hardcode this repo's install location, the same convention
+`create_public_repo.sh` already uses and for the same reason: they are
+one machine's workflow, gitignored, never published, so the usual
+"assume nothing about where the repo lives" rule that governs every
+*tracked* file does not apply to them. `DevComms/next_commit_message.txt`
+was added to `.gitignore` alongside them — it is the handoff file
+`git_commit_push.sh` reads and empties, meaningful for one run only.
+
+Verified for both: `bash -n` clean, and — because they are gitignored —
+excluded from `scrub_check.sh`'s scan by construction (it only scans
+tracked files and untracked-but-not-ignored files), so their real path
+never risks being published.
+
+### §10 the disc-layout sweep of tracked files
+
+Every tracked file was swept for a home-relative path naming this
+maintainer's projects directory by name. Three files carried it: the
+derivation log, this log, and the migration guide.
+None of the hits were the personal-information class §1–§8 above cover —
+no `/home/<user>` path, no handle, no email — they were this repo's own
+install location and a small number of sibling-repo locations, written
+as if every reader keeps their repos in the same place the maintainer
+does.
+
+The fix, applied throughout rather than by blind substitution:
+
+- **This repo's own install location** became `<airlock>`, matching the
+  placeholder `MIGRATING.md` already used for it in every "what changes"
+  table. A handful of rendered command transcripts and `usage()`-style
+  examples took the same placeholder with the trailing script name kept,
+  e.g. `<airlock>/airlock`.
+- **The predecessor sandbox's location** became `<sandboxdesign>`, the
+  same convention, for the same reason — it is Airlock's own lineage,
+  not a project using it, and is already named freely throughout both
+  logs without a path.
+- **A systemd unit's specifier-form equivalent** (`%h` standing in for
+  `~`, quoted in both logs as a historical description of a line the
+  repo no longer carries) became `%h/<sandboxdesign>/...` for the same
+  reason.
+- **Paths naming a different, real project that uses this sandbox**
+  (the derivation log names one such project by the path it once lived
+  under, plus four more in a licence-convention comparison) had the
+  disc-layout prefix dropped and the bare project name kept. That name
+  was already used freely, undecorated, dozens of times elsewhere in the
+  same historical record — hiding it only where a path preceded it would
+  not have protected anything and would have made the record harder to
+  audit. **This is a judged, recorded deviation** from anonymising the
+  path entirely: if the maintainer wants those project names withheld
+  everywhere rather than just out of path form, that is a larger,
+  separate pass and is listed below as awaiting the maintainer.
+- Two generic phrases named the projects-directory convention **as a
+  category**, not as part of a path (describing "the single worst
+  disc-layout assumption in the repo"), and were reworded to say exactly
+  that instead of naming the directory.
+- One phrase describing the *shape* of the earlier scrub's own fix (a
+  placeholder pairing the projects-directory name with a repo name,
+  itself already a placeholder rather than a real path) was reworded so
+  this log does not carry the swept string a second time, and now points
+  at this section instead.
+
+No sentence was substituted blind; each was re-read after editing.
+Verified: a repo-wide `grep` for the swept shape, across every tracked
+file, returns nothing (`xargs` exit 123, its empty-result code), and
+`scrub_check.sh` still passes.
+
+### §11 the `scrub_check.sh` decision
+
+Added: one pattern, `(~|%h)/Programming`, labelled a disc-layout
+assumption rather than personal information — it is a different class
+from §1's table and does not claim to be PII. Written split across an
+alternation so the guard's own tracked source does not carry the literal
+string it watches for, the same reason the personal-handle pattern above
+it is assembled at runtime rather than written out.
+
+**Declined:** the broader "any home-relative project path" shape the
+brief also invited. Several tracked files legitimately print real
+home-relative paths that are not this maintainer's disc layout at all —
+toolchain locations (`~/.cargo`, `~/.rustup`, `~/Android/Sdk`, and
+similar, in `probe_host.sh`), a systemd unit's own config directory
+(`~/.config/containers/systemd/`), and the neutral example paths
+`submit_project.sh` and `mounts.conf.example` already use
+(`~/code/MyProject` and siblings). A pattern broad enough to catch every
+home-relative shape would flag all of these on every future run, and a
+guard that cries wolf gets ignored — the brief's own warning. The
+narrow, literal pattern added has zero current matches and zero
+plausible false positives against anything in this repo today.
+
+**Proved, not asserted:**
+
+```
+$ bash ./scrub_check.sh
+=== scrub_check: 7 pattern(s), 40 tracked file(s), 0 untracked-and-unignored file(s) ===
+scrub_check: PASS - no personal or machine-identifying pattern found.
+```
+
+A planted violation (a throwaway untracked file whose one line joined
+the swept shape with a fake repo name — deleted immediately after, never
+committed, not reproduced here) was caught:
+
+```
+=== scrub_check: 7 pattern(s), 40 tracked file(s), 1 untracked-and-unignored file(s) ===
+  FAIL  __scrub_violation_test.md  [untracked, NOT ignored - would be published by git add -A]
+        pattern: disc-layout path assuming a specific projects directory
+        1:<the planted line, one occurrence of the pattern above>
+
+scrub_check: FAIL - 1 file/pattern hit(s) above.
+  Fix the file, or - if it is a private working document - add it to
+  .gitignore so it is never a candidate for publication.
+```
+
+Because the gitignored scripts above are excluded from both of
+`scrub_check.sh`'s scanned sets by construction (`git ls-files` and
+`git ls-files --others --exclude-standard` never include a gitignored
+path), the new pattern was added with no risk of flagging the real paths
+those two scripts legitimately need.
+
+## decided, recorded for audit
+
+1. **`git_commit_push.sh` and `git_status.sh` were written, gitignored,
+   and not run.** Both refuse before touching git if `scrub_check.sh`
+   fails or if an untracked-and-unignored file is present. Neither
+   force-pushes or rewrites history.
+2. **`DevComms/next_commit_message.txt` was added to `.gitignore`**
+   alongside them, as the handoff file the commit script consumes.
+3. **Every occurrence of the swept disc-layout shape in tracked files was
+   rewritten**, none by blind substitution — proof in §10.
+4. **`scrub_check.sh` gained one narrow pattern**, `(~|%h)/Programming`,
+   written so its own source does not carry the literal string. The
+   broader "any home-relative path" version was declined with reasons
+   in §11.
+5. **Sibling-project paths lost their disc-layout prefix but kept the
+   bare project name**, a judged deviation from full anonymisation —
+   reasoning in §10, flagged below.
+
+## awaiting the maintainer
+
+1. **Whether sibling-project names should be withheld entirely**, not
+   just their disc-layout prefix. The derivation log names one real
+   project that uses this sandbox, and four more alongside it in a
+   licence-convention table, by bare name in several places outside any
+   path. This pass left those as they were; scrubbing them fully is a
+   larger, separate, structural pass and is the maintainer's call.
+2. **Whether `git_commit_push.sh` and `git_status.sh` are wanted as
+   written.** Untested by this session, by instruction — nothing above
+   was run.

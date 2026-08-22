@@ -1,13 +1,13 @@
 # log 001 — Airlock, derived from SandboxDesign
 
 Written 2026-08-22. Airlock is a derivation of
-`~/Programming/SandboxDesign`, made public-ready and project-agnostic
+`<sandboxdesign>`, made public-ready and project-agnostic
 **by construction**. The name was ruled by the maintainer on
 2026-08-22, for the mechanism: a sealed chamber between two
 environments — work goes in one side, runs sealed, products come out
 the other.
 
-`~/Programming/SandboxDesign` is **not** modified, moved or
+`<sandboxdesign>` is **not** modified, moved or
 retired by this work. There is active work against it; retiring it is
 the maintainer's call and appears in the awaiting-maintainer list at the
 foot of this log.
@@ -21,7 +21,7 @@ The maintainer, 2026-08-22, having said it several times before:
 > really dont want to have to discuss the project-agnostic nature of
 > the sandbox container.
 
-`~/Programming/SandboxDesign/DevComms/log_002_documentation_scope_correction.md`
+`<sandboxdesign>/DevComms/log_002_documentation_scope_correction.md`
 records the last time this was fixed by rewriting prose, and its own
 awaiting-maintainer list names the two things prose could not fix:
 `agent/templates/pcv6_suite.sh` and the PseudoCoup sections of
@@ -34,11 +34,11 @@ Three changes of stance, same machinery:
 |---|---|---|
 | 1 | the CLI is the front door | `airlock` is the documented way in. The file protocol underneath is still the truth and a hand-drop still works, but the docs lead with the command |
 | 2 | project-agnostic by construction | nothing project-specific ships. No lane script, no template, no project name in any tracked file |
-| 3 | public-ready | a stranger can read `README.md` and use it. No `~/Programming` assumption in any code path; no personal path and no person's name in a tracked file |
+| 3 | public-ready | a stranger can read `README.md` and use it. No disc-layout assumption in any code path; no personal path and no person's name in a tracked file |
 
 ## Vocabulary
 
-`~/Programming/PseudoCoupHQ/CLAUDE.md` was read first and
+PseudoCoupHQ's `CLAUDE.md` was read first and
 binds everything below — code, comments, help text, output strings,
 docs and the commit message. Two bans are live in this work:
 
@@ -58,7 +58,7 @@ docs and the commit message. Two bans are live in this work:
 Bare names, `attributes:` and `methods:` headers, TAB indentation, no
 logic. Plan names ARE code identifiers. This is the shape the derived
 CLI carries; it is the shape
-`~/Programming/SandboxDesign/DevComms/log_003_cli_plan_and_build.md`
+`<sandboxdesign>/DevComms/log_003_cli_plan_and_build.md`
 settled today, and no name in it is replaced. What changes is spelling
 of the tool, the environment variable and the help text, not structure.
 
@@ -172,7 +172,7 @@ module functions
 `self_root` is the only identifier added to the plan the source CLI
 settled. It answers "where does this file live", so `usage()` can print
 a real, correct, machine-independent path in its examples instead of
-the hardcoded `~/Programming/SandboxDesign/sandbox` the source printed.
+the hardcoded `<sandboxdesign>/sandbox` the source printed.
 That hardcoded path is exactly the public-readiness defect stance 3
 exists to remove, and it appears in help text, which is output, so it
 could not be fixed by configuration alone.
@@ -185,7 +185,7 @@ could not be fixed by configuration alone.
 | root environment variable | `SANDBOX_DESIGN_ROOT` | `AIRLOCK_ROOT`, with `SANDBOX_DESIGN_ROOT` still honoured after it |
 | cpu environment variable read by `doctor` | `SANDBOX_CPUS` | `AIRLOCK_CPUS`, with `SANDBOX_CPUS` still honoured after it |
 | the no-tree refusal | `no SandboxDesign tree at <path>` | `no Airlock tree at <path>` |
-| paths printed in `usage()` | `~/Programming/SandboxDesign/...` | derived from `self_root()` |
+| paths printed in `usage()` | `<sandboxdesign>/...` | derived from `self_root()` |
 
 Not changed, deliberately: every `submit` refusal and every warning
 (the nine refusals SandboxDesign's log 003 named, plus the tenth its
@@ -220,7 +220,7 @@ start the other's container, bound to the other's `agent/` directories.
 
 ---
 
-## Fate of every file in `~/Programming/SandboxDesign`
+## Fate of every file in `<sandboxdesign>`
 
 Read in full before this table was written. "Carried whole" means
 byte-identical. "Carried, edited" lists the edit; for every carried
@@ -230,7 +230,7 @@ section below.
 
 ### carried
 
-| source file | fate in `~/Programming/Airlock` | reason |
+| source file | fate in `<airlock>` | reason |
 |---|---|---|
 | `down.sh` | carried whole | no personal path, no project name, no rename needed |
 | `allow.sh` | carried whole | same |
@@ -248,16 +248,16 @@ section below.
 | `agent/.gitignore` | carried whole | the runtime-state convention, unchanged |
 | `agent/drop/.gitignore`, `agent/logs/.gitignore`, `agent/status/.gitignore`, `agent/out/.gitignore` | carried whole | `* / !.gitignore` — this IS the "fresh clone works" structure the brief asks for |
 | `up.sh` | carried, edited | `AIRLOCK_CPUS` added as the new spelling, `SANDBOX_CPUS` still honoured after it, default **6** (full share, ruled by the maintainer 2026-08-22). Header comment rewritten to match |
-| `progress.sh` | carried, edited (comments only) | two usage-comment lines carried `~/Programming/SandboxDesign/progress.sh`. Executable text byte-identical — proved in testing |
+| `progress.sh` | carried, edited (comments only) | two usage-comment lines carried `<sandboxdesign>/progress.sh`. Executable text byte-identical — proved in testing |
 | `batch.sh` | carried, edited (comments only) | same two-line problem in its usage block |
-| `submit_project.sh` | carried, edited (comments and one hint line) | its neutral examples still said `~/Programming/MyProject`, which bakes one machine's layout into a public example; a comment used a banned relation word for a co-located tree; and its closing hint named `git_commit_push.sh`, which is not carried across |
+| `submit_project.sh` | carried, edited (comments and one hint line) | its neutral examples still assumed a specific projects-directory name (`MyProject` under it), which bakes one machine's layout into a public example; a comment used a banned relation word for a co-located tree; and its closing hint named `git_commit_push.sh`, which is not carried across |
 | `report.sh` | carried, edited (comments only) | its closing hint named `./git_commit_push.sh`, which is not carried across |
-| `probe_host.sh` | carried, edited (one code line) | `REPO=~/Programming/SandboxDesign` hardcoded one machine's layout in **code**. Now derived from the script's own directory |
+| `probe_host.sh` | carried, edited (one code line) | `REPO=<sandboxdesign>` hardcoded one machine's layout in **code**. Now derived from the script's own directory |
 | `install_quadlet.sh` | carried, edited | must now render the agent-lane `Volume=` lines from the repo's own location instead of relying on a hardcoded path inside the unit file |
-| `quadlet/sandbox-runner.container` | carried, edited | its four `Volume=%h/Programming/SandboxDesign/agent/...` lines were the single worst `~/Programming` assumption in the repo. Replaced by `# >>> AGENT LANE` / `# <<< AGENT LANE` markers, filled by `install_quadlet.sh` — the same mechanism the `MOUNTS` markers already used |
+| `quadlet/sandbox-runner.container` | carried, edited | its four `Volume=%h/<sandboxdesign>/agent/...` lines were the single worst disc-layout assumption in the repo. Replaced by `# >>> AGENT LANE` / `# <<< AGENT LANE` markers, filled by `install_quadlet.sh` — the same mechanism the `MOUNTS` markers already used |
 | `daemon/watcher.py` | carried, edited (comments only) | two comments named a person; one used a banned word for the outcome where the OS stops a process. Its own `KILLED after <n>s timeout` **data token stays exactly as it is** — changing it would break `airlock status`'s ABORT mapping and `submit_project.sh`'s completion detection. Executable text byte-identical — proved in testing |
 | `Containerfile` | carried, edited (comments only) | comments named a person, a file that is not carried across, and one project's file counts; one used a banned word for stopping a build |
-| `mounts.conf.example` | carried, edited (comments only) | said "SandboxDesign itself is meant to be a project-agnostic template"; examples used `~/Programming/...` |
+| `mounts.conf.example` | carried, edited (comments only) | said "SandboxDesign itself is meant to be a project-agnostic template"; examples assumed a specific projects-directory name in the path |
 
 ### renamed and rewritten
 
@@ -277,7 +277,7 @@ section below.
 | `mounts.conf` | per-machine configuration naming one machine's real project trees. Correctly gitignored in the source; `mounts.conf.example` is carried and is the documentation |
 | `proxy/allowlist.txt` | per-machine live egress policy. Gitignored in the source; `proxy/allowlist.txt.example` is carried |
 | `agent/batch.json`, `agent/drop/.done/*`, `agent/logs/*`, `agent/out/*`, `agent/status/*` | runtime state of one machine's runs. `agent/out/` alone held 480 products |
-| `create_github_repo.sh` | hardcodes `REPO=~/Programming/SandboxDesign`, names one person, and creates a **private** repo. Whether Airlock is published, and under what visibility, is the maintainer's decision — see the awaiting-maintainer list. The two commands needed are in `MIGRATING.md` |
+| `create_github_repo.sh` | hardcodes `REPO=<sandboxdesign>`, names one person, and creates a **private** repo. Whether Airlock is published, and under what visibility, is the maintainer's decision — see the awaiting-maintainer list. The two commands needed are in `MIGRATING.md` |
 | `git_commit_push.sh` | hardcodes the same path and describes one person's workflow with `DevComms/next_commit_message.txt` |
 | `DevComms/log_001_cpu_cap_and_batch_progress.md`, `DevComms/log_002_documentation_scope_correction.md`, `DevComms/log_003_cli_plan_and_build.md`, `DevComms/log_003_shape_pass2.py` | SandboxDesign's development record. It belongs to that repo and stays readable there; this log cites it by full path where it matters |
 | `DevComms/host_inventory.txt` | an inventory of one real machine — every toolchain, every SDK directory, the CPU model |
@@ -292,7 +292,7 @@ section below.
 | `MIGRATING.md` | for a project already using SandboxDesign: what changes (the command name), what does not (the file protocol, every path under `agent/`), and the exact commands |
 | `LICENSE.md` | a placeholder. The licence is the maintainer's to pick — see the awaiting-maintainer list |
 | `DevComms/log_001_airlock_derivation.md` | this file |
-| `DevComms/log_001_shape_pass2.py` | the pass-2 snapshot, so the middle pass is auditable rather than asserted. Same convention as `~/Programming/SandboxDesign/DevComms/log_003_shape_pass2.py` |
+| `DevComms/log_001_shape_pass2.py` | the pass-2 snapshot, so the middle pass is auditable rather than asserted. Same convention as `<sandboxdesign>/DevComms/log_003_shape_pass2.py` |
 
 ---
 
@@ -304,7 +304,7 @@ NotImplementedError` for a body. It compiles clean. It matches the §2
 overview above identifier for identifier.
 
 The three-pass rule governs what is **written**, not what is **moved**.
-Code carried across from `~/Programming/SandboxDesign` is
+Code carried across from `<sandboxdesign>` is
 carried whole in one step; there is no meaning in stubbing out a file
 that already exists and already works.
 
@@ -319,12 +319,14 @@ Filled in last. What follows is the evidence.
 `podman` is not on `PATH` in this session, so nothing that needs a
 running container could be exercised. Everything below was run against
 a throwaway tree under `/tmp`. **Nothing under
-`~/Programming/SandboxDesign/agent` was written to**, and
-`~/Programming/SandboxDesign` was not modified at all.
+`<sandboxdesign>/agent` was written to**, and
+`<sandboxdesign>` was not modified at all.
 
-Paths in the rendered output below are shown in their `~/Programming`
-form. The run itself saw them through a temporary agent session mount
-prefix, which carries no meaning outside that session.
+Paths in the rendered output below are shown in the form they take on
+a real install, one repo per top-level entry rather than the mount
+path this run actually used. The run itself saw them through a
+temporary agent session mount prefix, which carries no meaning outside
+that session.
 
 ### the fixtures
 
@@ -337,7 +339,7 @@ Two throwaway trees:
 
 ### static checks
 
-`bash -n` on every shell script in `~/Programming/Airlock`:
+`bash -n` on every shell script in `<airlock>`:
 
 ```
   syntax OK  allow.sh          syntax OK  progress.sh
@@ -386,9 +388,9 @@ what runs. Every difference, in full:
 | file | the whole difference |
 |---|---|
 | `daemon/watcher.py` | one docstring line that named a person on the host, rewritten to `anything else on the host`; one comment line rewritten to remove a banned word for the OS-stopped outcome |
-| `submit_project.sh` | four example lines under `~/Programming/...` → `~/code/...`; one comment word (`sibling` → `co-located tree`); two closing `echo` lines that named `git_commit_push.sh` |
+| `submit_project.sh` | four example lines that named a specific projects directory → `~/code/...`; one comment word (`sibling` → `co-located tree`); two closing `echo` lines that named `git_commit_push.sh` |
 | `report.sh` | two closing `echo` lines that named `git_commit_push.sh` |
-| `probe_host.sh` | `REPO=~/Programming/SandboxDesign` → `REPO="$(cd "$(dirname "$0")" && pwd)"`, plus two closing `echo` lines |
+| `probe_host.sh` | `REPO=<sandboxdesign>` → `REPO="$(cd "$(dirname "$0")" && pwd)"`, plus two closing `echo` lines |
 | `selftest.sh` | one comment word |
 | `Containerfile` | comment block only |
 | `mounts.conf.example` | comment block only |
@@ -423,7 +425,7 @@ required to name the candidate licence's location) and `MIGRATING.md`
 ### `airlock --help`
 
 ```
-$ ~/Programming/Airlock/airlock --help
+$ <airlock>/airlock --help
 airlock - the command-line front door to an Airlock sandbox.
 
 Airlock runs a bash script inside a container with a capped cpu
@@ -436,11 +438,11 @@ agent/status -> agent/logs -> agent/out. This program checks
 before it writes. A hand-drop, and every shell script in this
 repo, keep working with or without it.
 
-this repo: ~/Programming/Airlock
+this repo: <airlock>
 
 usage:
-  ~/Programming/Airlock/airlock <command> [...]
-  python3 ~/Programming/Airlock/airlock <command> [...]
+  <airlock>/airlock <command> [...]
+  python3 <airlock>/airlock <command> [...]
 
 commands
 | command | what it does |
@@ -494,8 +496,8 @@ what this program does NOT do:
     same hidden-then-rename hand-drop, which needs no podman.
   - it does not reimplement progress.sh. For the full view, including
     live processes inside the container:
-      bash ~/Programming/Airlock/progress.sh     one snapshot
-      bash ~/Programming/Airlock/progress.sh -w  refreshing
+      bash <airlock>/progress.sh     one snapshot
+      bash <airlock>/progress.sh -w  refreshing
 [exit 0]
 ```
 
@@ -705,14 +707,14 @@ no difference in indentation between the two writers:
 
 This is the compatibility test that was verified for SandboxDesign's
 `sandbox` today and must not regress. The file exercised is a copy of
-`~/Programming/SandboxDesign/progress.sh` with nothing changed
+`<sandboxdesign>/progress.sh` with nothing changed
 — proved before it was run:
 
 ```
-$ sha256sum ~/Programming/SandboxDesign/progress.sh /tmp/airlock_fake/progress.sh
-3ce68f1483276817282a44badf7be5b2b0acd0a86e3414b66a5559cca56ac489  ~/Programming/SandboxDesign/progress.sh
+$ sha256sum <sandboxdesign>/progress.sh /tmp/airlock_fake/progress.sh
+3ce68f1483276817282a44badf7be5b2b0acd0a86e3414b66a5559cca56ac489  <sandboxdesign>/progress.sh
 3ce68f1483276817282a44badf7be5b2b0acd0a86e3414b66a5559cca56ac489  /tmp/airlock_fake/progress.sh
-$ cmp ~/Programming/SandboxDesign/progress.sh /tmp/airlock_fake/progress.sh
+$ cmp <sandboxdesign>/progress.sh /tmp/airlock_fake/progress.sh
   cmp: byte-identical
 ```
 
@@ -959,7 +961,7 @@ $ airlock --root /tmp/airlock_fake submit a.sh b.sh --no-batch
 
 ### the quadlet agent-lane splice
 
-The single worst `~/Programming` assumption in the source repo was four
+The single worst disc-layout assumption in the source repo was four
 hardcoded `Volume=` lines inside a tracked unit file. The repo copy now
 carries empty markers and no path at all:
 
@@ -998,7 +1000,7 @@ were added.** Nothing else in the unit changed.
 
 | capability | why |
 |---|---|
-| `up.sh`, `down.sh`, `build.sh`, `pull.sh`, `logs.sh`, `report.sh`, `selftest.sh`, `submit.sh`, `submit_project.sh` end to end | `podman` is not on `PATH` in this session. All were checked with `bash -n`, and every one is byte-identical or comment-only-different from a file that works today in `~/Programming/SandboxDesign` |
+| `up.sh`, `down.sh`, `build.sh`, `pull.sh`, `logs.sh`, `report.sh`, `selftest.sh`, `submit.sh`, `submit_project.sh` end to end | `podman` is not on `PATH` in this session. All were checked with `bash -n`, and every one is byte-identical or comment-only-different from a file that works today in `<sandboxdesign>` |
 | `install_quadlet.sh` end to end | needs `systemctl --user` and `podman`. Its one genuinely new mechanism, the agent-lane splice, was exercised in isolation above |
 | `airlock doctor`'s container, toolchain and granted-core checks | each needs a running container. Each degrades to a NOTE, which is visible in both rendered runs above |
 | the resolved package versions in the built image | needs a build. The README marks them **unverified** and points at `report.sh` |
@@ -1067,7 +1069,7 @@ were added.** Nothing else in the unit changed.
   four agent-lane `Volume=` lines are generated by
   `install_quadlet.sh` from the repo's own location and spliced into the
   installed copy, using the same marker mechanism the `MOUNTS` block
-  already used. This was the single worst `~/Programming` assumption in
+  already used. This was the single worst disc-layout assumption in
   the source repo.
 - **`probe_host.sh` no longer hardcodes a repo path.** `REPO` is derived
   from the script's own directory.
@@ -1095,12 +1097,12 @@ were added.** Nothing else in the unit changed.
   clean). Logic and docs last. Code **moved** from SandboxDesign was
   moved whole in one step — the three-pass rule governs what is written.
 - **Vocabulary conforms to
-  `~/Programming/PseudoCoupHQ/CLAUDE.md`** throughout — this
+  PseudoCoupHQ's `CLAUDE.md`** throughout — this
   repo's code, comments, help text, output strings, docs and its commit
   message. Four carried-across files needed a one-word comment fix
   (`selftest.sh`, `daemon/watcher.py`, `Containerfile`,
   `submit_project.sh`); the sweep results are above.
-- **`~/Programming/SandboxDesign` was not modified.** Verified:
+- **`<sandboxdesign>` was not modified.** Verified:
   no file under it was written, and its `agent/` tree was never touched.
   One stray `agent/batch.json` was created inside `Airlock` during
   testing when a carried script `cd`'d to its own directory; it was
@@ -1114,12 +1116,12 @@ were added.** Nothing else in the unit changed.
 Three, kept minimal.
 
 - **The licence.** `LICENSE.md` is a
-  placeholder saying so. `~/Programming/PseudoCoupHQ/OTU GREEN LICENSE
+  placeholder saying so. PseudoCoupHQ's `OTU GREEN LICENSE
   FOR UNIVERSAL WORKS.pdf` exists in this line of work, and the identical
   document sits beside `PseudoCoup_v6`, `PseudoCoup_v5`, `PseudoIR` and
   `PlanPlan` — it may be the intended one. It has not been applied,
   because applying a licence outlasts the session that did it.
-- **Whether to retire `~/Programming/SandboxDesign`.** It is
+- **Whether to retire `<sandboxdesign>`.** It is
   untouched and still works. Airlock is a derivation, not a replacement,
   until the maintainer says otherwise. Note the two installs cannot run
   at the same time (same container names).
@@ -1129,7 +1131,7 @@ Three, kept minimal.
 
 **Two of the three were settled the same day. See the 2026-08-22 section
 below, which supersedes the licence item and the publication item; the
-retirement of `~/Programming/SandboxDesign` is still open.**
+retirement of `<sandboxdesign>` is still open.**
 
 ---
 
@@ -1148,11 +1150,11 @@ Every repo in the line was inspected before anything was written:
 
 | repo | `LICENSE` / `LICENSE.md` present | PDF at repo root | PDF tracked in git | licence named in a `README.md` |
 |---|---|---|---|---|
-| `~/Programming/PseudoCoupHQ` | no | yes | yes | no README |
-| `~/Programming/PseudoCoup_v6` | no | yes | yes | no README |
-| `~/Programming/PseudoCoup_v5` | no | yes | yes | README exists, does not mention it |
-| `~/Programming/PseudoIR` | no | yes | yes | no README |
-| `~/Programming/PlanPlan` | no | yes | yes | README exists, does not mention it |
+| `PseudoCoupHQ` | no | yes | yes | no README |
+| `PseudoCoup_v6` | no | yes | yes | no README |
+| `PseudoCoup_v5` | no | yes | yes | README exists, does not mention it |
+| `PseudoIR` | no | yes | yes | no README |
+| `PlanPlan` | no | yes | yes | README exists, does not mention it |
 
 **The convention is the PDF alone, at the repo root, tracked in git.**
 No repo in the line carries a `LICENSE` or `LICENSE.md`, and none names
@@ -1163,7 +1165,7 @@ the licence in prose. All five PDFs are byte-identical —
 
 | action | detail |
 |---|---|
-| carried the file | `~/Programming/PseudoCoupHQ/OTU GREEN LICENSE FOR UNIVERSAL WORKS.pdf` → `OTU GREEN LICENSE FOR UNIVERSAL WORKS.pdf`. Verified byte-identical with `cmp` and `md5sum` after the copy |
+| carried the file | PseudoCoupHQ's `OTU GREEN LICENSE FOR UNIVERSAL WORKS.pdf` → `OTU GREEN LICENSE FOR UNIVERSAL WORKS.pdf`. Verified byte-identical with `cmp` and `md5sum` after the copy |
 | rewrote `LICENSE.md` | the placeholder is gone. It now names the licence and points at the PDF beside it, and **restates no term of it** |
 | referenced it in `README.md` | a new `## Licence` section, a `Contents` table row, and two rows in the `Files` table (the PDF, and what `LICENSE.md` now is) |
 
@@ -1187,15 +1189,15 @@ signpost, not a second copy of the terms.
 The maintainer: *"if you can migrate from SandboxDesign to Airlock for
 PCHQ -- and the Claude skill if needed -- yes please"*.
 
-Recorded in full at
-`~/Programming/PseudoCoupHQ/DevComms/log_060_sandbox_to_airlock_migration.md`,
+Recorded in full at PseudoCoupHQ's
+`DevComms/log_060_sandbox_to_airlock_migration.md`,
 which carries the whole old-path→new-path and old-command→new-command
 mapping. The summary:
 
 ### the scope, measured
 
-The brief estimated "roughly 20+ files". Measured: **50 files** under
-`~/Programming/PseudoCoupHQ` contain the string
+The brief estimated "roughly 20+ files". Measured: **50 files** in
+PseudoCoupHQ contain the string
 `SandboxDesign` — 18 DevComms logs, 2 top-level memory files, 5 Planning
 files, 17 `Research/` files, and 8 `__pycache__/*.pyc` artefacts. The
 estimate was low because it did not count the `Research/` tree.
@@ -1229,8 +1231,8 @@ scripts and `create_github_repo.sh`. No PseudoCoupHQ shell script names
 
 ### `bash hq.sh check` after the edits
 
-Run as
-`cd ~/Programming/PseudoCoupHQ && HOME=<session mount root> bash hq.sh check`:
+Run from PseudoCoupHQ's own tree as
+`HOME=<session mount root> bash hq.sh check`:
 
 ```
 summary: 0 error(s), 8 warning(s)
@@ -1252,10 +1254,10 @@ appended to it.
 ### the `Research/` tree was deliberately not repointed
 
 Seventeen files under
-`~/Programming/PseudoCoupHQ/Research/` resolve a
+PseudoCoupHQ's `Research/` resolve a
 `SandboxDesign` path. They are live tooling and the obvious move is to
 repoint them. They were left alone because repointing them **breaks them
-against their own data**: `~/Programming/SandboxDesign/agent/out`
+against their own data**: `<sandboxdesign>/agent/out`
 holds **480 products** — every run of record for that line — and
 `agent/out` holds **0**, exactly as `MIGRATING.md` says it should. A
 reader repointed at Airlock finds nothing.
@@ -1302,7 +1304,7 @@ generate a gitignored bash script that i can run to create the public
 repo."*
 
 Written at `create_public_repo.sh`, following
-`~/Programming/PseudoCoupHQ/create_github_repo.sh` (and SandboxDesign's
+PseudoCoupHQ's `create_github_repo.sh` (and SandboxDesign's
 copy, which is the same file with the name and the
 commit message changed). **The account mechanism is not reinvented**: it
 is whichever account `gh` is authenticated as on the machine, exactly as
@@ -1331,8 +1333,8 @@ and that `mounts.conf` and `proxy/allowlist.txt` were not published.
 `bash -n` passes. **It was not run** — that is the maintainer's to do:
 
 ```
-bash ~/Programming/Airlock/create_public_repo.sh --dry-run   # see the plan, change nothing
-bash ~/Programming/Airlock/create_public_repo.sh             # do it, with one confirmation
+bash <airlock>/create_public_repo.sh --dry-run   # see the plan, change nothing
+bash <airlock>/create_public_repo.sh             # do it, with one confirmation
 ```
 
 ## Testing, this section's work
@@ -1369,7 +1371,7 @@ patch says so and gives the fallback.
   will read.
 - **`README.md` names the licence** in a new `## Licence` section, in the
   `Contents` table and in the `Files` table.
-- **PseudoCoupHQ's sandbox of record is now `~/Programming/Airlock`.**
+- **PseudoCoupHQ's sandbox of record is now `<airlock>`.**
   Four files edited, one log written; full mapping in log 060.
 - **The 18 PseudoCoupHQ DevComms logs were not rewritten**, proved by
   sha256 before and after. A log said what was true on its date.
@@ -1382,7 +1384,7 @@ patch says so and gives the fallback.
 - **`bash hq.sh check` reports 0 errors** after the edits.
 - **The 17 `Research/` files were deliberately not repointed**, because
   the 480 products they read live in
-  `~/Programming/SandboxDesign/agent/out` and Airlock's is
+  `<sandboxdesign>/agent/out` and Airlock's is
   empty by design. Full inventory and the two coherent options in log
   060 §4.
 - **The toolchain skill's cached copy was not edited** — editing it
@@ -1397,9 +1399,9 @@ patch says so and gives the fallback.
   file" property intact; both are one line to reverse.
 - **`create_public_repo.sh` was not run.** No repository exists, no
   remote is configured, nothing was pushed.
-- **`~/Programming/SandboxDesign` was still not modified** by
+- **`<sandboxdesign>` was still not modified** by
   any part of this section.
-- **One additional commit in `~/Programming/Airlock`**, no
+- **One additional commit in `<airlock>`**, no
   remote, no push — as instructed.
 
 ## awaiting the maintainer — 2026-08-22, this section
@@ -1408,7 +1410,7 @@ Two, kept minimal.
 
 - **Whether to repoint the 17 `Research/` files in PseudoCoupHQ**, and
   if so whether to move the 480 products out of
-  `~/Programming/SandboxDesign/agent/out` first. This decides
+  `<sandboxdesign>/agent/out` first. This decides
   where the line's data lives. Log 060 §4 has the inventory and both
   options.
 - **Saving the toolchain skill.** The replacement text is written and
@@ -1418,7 +1420,7 @@ Two, kept minimal.
   have.
 
 Still open from the original list above: **whether to retire
-`~/Programming/SandboxDesign`.** It is untouched, still works,
+`<sandboxdesign>`.** It is untouched, still works,
 and still holds the runs of record — the `Research/` question above bears
 directly on it.
 
