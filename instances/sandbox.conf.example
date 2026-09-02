@@ -1,0 +1,48 @@
+# instances/<name>.conf — one running sandbox's settings.
+#
+# Copy this to instances/<name>.conf and edit. The file is OPTIONAL and
+# per-machine: every key below falls back to the built-in default shown,
+# which is the value Airlock hardcoded before instances existed. It is
+# gitignored, exactly like mounts.conf.
+#
+# Name the instance with `--instance <name>` on any script or the airlock
+# command, or with AIRLOCK_INSTANCE. The default instance is `sandbox`.
+#
+# Container, network and systemd unit names are DERIVED from the instance
+# name and are never written here:
+#   <name>-runner  <name>-proxy  <name>-internal  <name>-egress
+
+# ---- caps ----------------------------------------------------------------
+cpus            = 6         # AIRLOCK_CPUS and up.sh --cpus both override this
+memory          = 12g
+pids_limit      = 2048
+tmp_size        = 2g        # the /tmp tmpfs cap
+work_size       = 4g        # the /work tmpfs cap
+
+# ---- the egress gate -----------------------------------------------------
+proxy             = yes     # `no` = no proxy container and no route out at all
+proxy_memory      = 512m
+proxy_cpus        = 1
+proxy_pids_limit  = 256
+allowlist_file    = proxy/allowlist.txt
+
+# ---- what this instance can see -----------------------------------------
+mounts_file     = mounts.conf
+# agent_dir     = <root>/agent for the `sandbox` instance,
+#                 <root>/instances/<name>/agent for any other
+
+# ---- the images ----------------------------------------------------------
+# An image is a build artifact, not instance state: leave these alone and a
+# second instance reuses the image the first one built, with no rebuild.
+runner_image    = sandbox-runner:latest
+proxy_image     = sandbox-proxy:latest
+
+# ---- the persist volume --------------------------------------------------
+persist_volume  = <name>-persist
+persist_mode    = rw        # `ro` to share another instance's volume safely
+
+# ---- the daemon inside the runner ---------------------------------------
+lane_nice       = 15
+script_timeout  = 3600
+watch           = inotify   # `poll` if this machine has run out of inotify
+                            # INSTANCES (/proc/sys/fs/inotify/max_user_instances)
