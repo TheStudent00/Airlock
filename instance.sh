@@ -96,6 +96,20 @@ _airlock_conf_get() {
     printf '%s' "$found"
 }
 
+# _airlock_abs PATH ROOT -> PATH made absolute.
+#   `~` expands to the home directory; a relative path is taken as relative
+#   to the Airlock root, so a conf file may say `mounts.conf` and mean the
+#   one beside it.
+_airlock_abs() {
+    local p="$1"
+    local root="$2"
+    p="${p/#\~/$HOME}"
+    case "$p" in
+        /*) printf '%s' "$p" ;;
+        *) printf '%s/%s' "$root" "$p" ;;
+    esac
+}
+
 # _airlock_pick VALUE_FROM_CONF DEFAULT -> the first that is non-empty.
 _airlock_pick() {
     if [ -n "${1:-}" ]; then
@@ -140,7 +154,7 @@ airlock_instance_load() {
         default_agent="$AL_ROOT/instances/$AL_INSTANCE/agent"
     fi
     AL_AGENT_DIR="$(_airlock_pick "$(_airlock_conf_get "$AL_CONF" agent_dir)" "$default_agent")"
-    AL_AGENT_DIR="${AL_AGENT_DIR/#\~/$HOME}"
+    AL_AGENT_DIR="$(_airlock_abs "$AL_AGENT_DIR" "$AL_ROOT")"
 
     # --- images ---------------------------------------------------------
     # The image is a BUILD ARTIFACT, not instance state: a second instance
@@ -182,9 +196,9 @@ airlock_instance_load() {
 
     # --- per-machine files -----------------------------------------------
     AL_MOUNTS_FILE="$(_airlock_pick "$(_airlock_conf_get "$AL_CONF" mounts_file)" "$AL_ROOT/mounts.conf")"
-    AL_MOUNTS_FILE="${AL_MOUNTS_FILE/#\~/$HOME}"
+    AL_MOUNTS_FILE="$(_airlock_abs "$AL_MOUNTS_FILE" "$AL_ROOT")"
     AL_ALLOWLIST="$(_airlock_pick "$(_airlock_conf_get "$AL_CONF" allowlist_file)" "$AL_ROOT/proxy/allowlist.txt")"
-    AL_ALLOWLIST="${AL_ALLOWLIST/#\~/$HOME}"
+    AL_ALLOWLIST="$(_airlock_abs "$AL_ALLOWLIST" "$AL_ROOT")"
 
     # --- what the daemon inside the runner is told ------------------------
     AL_LANE_NICE="$(_airlock_pick "$(_airlock_conf_get "$AL_CONF" lane_nice)" "15")"
