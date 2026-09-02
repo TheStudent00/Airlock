@@ -12,13 +12,20 @@
 # Usage:
 #   bash <airlock>/progress.sh          one snapshot
 #   bash <airlock>/progress.sh -w       refresh every 2 s
+#   bash <airlock>/progress.sh --instance trickle [-w]
+#                                       a different instance; default `sandbox`
 set -uo pipefail
 cd "$(dirname "$0")"
 
-DROP=agent/drop
-LOGS=agent/logs
-STATUS=agent/status
-BATCH_JSON=agent/batch.json
+source "$(dirname "$0")/instance.sh"
+airlock_parse_instance "$@"
+set -- "${AIRLOCK_ARGV[@]}"
+airlock_instance_load "$(cd "$(dirname "$0")" && pwd)"
+
+DROP="$AL_AGENT_DIR/drop"
+LOGS="$AL_AGENT_DIR/logs"
+STATUS="$AL_AGENT_DIR/status"
+BATCH_JSON="$AL_AGENT_DIR/batch.json"
 
 # ---- batch summary --------------------------------------------------------
 #
@@ -184,6 +191,8 @@ print_batch_summary() {
 }
 
 snapshot() {
+  echo "== instance $AL_INSTANCE  (runner $AL_RUNNER, agent $AL_AGENT_DIR) =="
+  echo
   print_batch_summary
 
   echo "== queued (waiting in $DROP) =="
@@ -217,9 +226,9 @@ snapshot() {
   [ "$any" = 0 ] && echo "  (nothing running)"
   echo
 
-  echo "== live processes inside sandbox-runner (top by CPU) =="
+  echo "== live processes inside $AL_RUNNER (top by CPU) =="
   if command -v podman > /dev/null 2>&1; then
-      podman exec sandbox-runner ps -eo pid,pcpu,etime,comm,args --sort=-pcpu 2>/dev/null \
+      podman exec "$AL_RUNNER" ps -eo pid,pcpu,etime,comm,args --sort=-pcpu 2>/dev/null \
         | head -12 | sed 's/^/  /' \
         || echo "  (container not up, or ps unavailable inside it)"
   else
