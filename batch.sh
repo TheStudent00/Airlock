@@ -21,6 +21,12 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
+source "$(dirname "$0")/instance.sh"
+airlock_parse_instance "$@"
+set -- "${AIRLOCK_ARGV[@]}"
+airlock_instance_load "$(cd "$(dirname "$0")" && pwd)"
+
+
 usage() {
   echo "usage: bash batch.sh <label> <lane.sh>:<weight> [<lane2.sh>:<weight2> ...]" >&2
   exit 1
@@ -35,7 +41,7 @@ BATCH_ID="batch-$(date -u +%Y%m%dT%H%M%SZ)"
 CREATED="$(date -u +%Y-%m-%dT%H:%M:%S+00:00)"
 
 mkdir -p agent
-TMP="agent/.batch.json.tmp.$$"
+TMP="$AL_AGENT_DIR/.batch.json.tmp.$$"
 
 {
   echo "{"
@@ -71,5 +77,5 @@ TMP="agent/.batch.json.tmp.$$"
   echo "}"
 } > "$TMP"
 
-mv "$TMP" agent/batch.json
-echo "wrote agent/batch.json  (batch $BATCH_ID, label '$LABEL', $# lane(s))"
+mv "$TMP" "$AL_AGENT_DIR/batch.json"
+echo "wrote $AL_AGENT_DIR/batch.json  (batch $BATCH_ID, label '$LABEL', $# lane(s))"
