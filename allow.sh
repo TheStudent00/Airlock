@@ -4,6 +4,7 @@
 # squid in place (no restart, no dropped connections).
 #
 # Usage:
+#   ./allow.sh [--instance NAME] ...   which sandbox's proxy; default `sandbox`
 #   ./allow.sh list
 #   ./allow.sh add pypi.org files.pythonhosted.org
 #   ./allow.sh remove github.com
@@ -12,12 +13,20 @@
 #                               undeclared reaches worth looking at)
 set -euo pipefail
 cd "$(dirname "$0")"
-FILE=proxy/allowlist.txt
+
+source "$(dirname "$0")/instance.sh"
+airlock_parse_instance "$@"
+set -- "${AIRLOCK_ARGV[@]}"
+airlock_instance_load "$(cd "$(dirname "$0")" && pwd)"
+
+# The allowlist file is the instance's own (allowlist_file in its conf);
+# by default every instance shares proxy/allowlist.txt.
+FILE="$AL_ALLOWLIST"
 
 push() {
-    podman container exists sandbox-proxy || { echo "sandbox-proxy not running" >&2; exit 1; }
-    podman cp "$FILE" sandbox-proxy:/etc/squid/allowlist.txt
-    podman exec sandbox-proxy squid -k reconfigure -f /etc/squid/squid.conf
+    podman container exists "$AL_PROXY" || { echo "$AL_PROXY not running" >&2; exit 1; }
+    podman cp "$FILE" "$AL_PROXY:/etc/squid/allowlist.txt"
+    podman exec "$AL_PROXY" squid -k reconfigure -f /etc/squid/squid.conf
     echo "  allowlist pushed and squid reloaded"
 }
 
@@ -56,10 +65,10 @@ case "${1:-list}" in
     push
     ;;
   denied)
-    podman logs sandbox-proxy 2>&1 | grep -E 'TCP_DENIED|DENIED' | tail -40 \
+    podman logs "$AL_PROXY" 2>&1 | grep -E 'TCP_DENIED|DENIED' | tail -40 \
         || echo "  no refusals logged"
     ;;
   *)
-    sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'
     ;;
 esac
