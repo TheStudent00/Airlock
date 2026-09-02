@@ -25,6 +25,14 @@ agent/batch.json.airlock.tmp
 # committed and is the documentation; the real file never is.
 mounts.conf
 
+# Which INSTANCES this install runs, and each one's caps. Same pattern as
+# mounts.conf: instances/sandbox.conf.example is committed and is the
+# documentation, the real .conf files never are. An instance's own agent
+# tree lives under instances/<name>/ and is a run record, not a tool file.
+instances/*.conf
+!instances/*.conf.example
+instances/*/
+
 # Which hosts THIS install may reach. Same pattern: the .example is the
 # committed baseline a new install copies from.
 proxy/allowlist.txt
