@@ -733,14 +733,20 @@ class Doctor:
         """Cores actually granted vs the cpu setting vs the quadlet unit.
 
         Three numbers that are allowed to disagree: podman inspect's
-        NanoCpus, up.sh's own default, and
-        quadlet/sandbox-runner.container's PodmanArgs=--cpus. Airlock
-        ships with the last two in agreement at the full share, ruled
-        2026-08-22; this check is what tells you if they drift apart.
+        NanoCpus, the cpu setting this INSTANCE resolves to (instance.sh
+        plus instances/<name>.conf), and the PodmanArgs=--cpus in the
+        systemd unit for this instance. Airlock ships with the last two in
+        agreement at the full share, ruled 2026-08-22; this check is what
+        tells you if they drift apart.
         """
         found = []
-        up_default = _grep_number(paths.script("up.sh"),
-                                  r"(?:AIRLOCK|SANDBOX)_CPUS:-([0-9.]+)")
+        up_default = None
+        configured = paths.settings.get("AL_CPUS")
+        if configured is not None:
+            try:
+                up_default = float(configured)
+            except ValueError:
+                up_default = None
         quadlet_cpus = _grep_number(paths.quadlet_runner,
                                     r"PodmanArgs=.*--cpus=([0-9.]+)")
         env_cpus = (os.environ.get("AIRLOCK_CPUS")
@@ -749,18 +755,19 @@ class Doctor:
         if up_default is None:
             found.append(Finding(
                 WARN, "AIRLOCK_CPUS",
-                "could not read a cpu default out of %s"
-                % paths.script("up.sh"),
-                "check that the AIRLOCK_CPUS:-${SANDBOX_CPUS:-<n>} line is "
-                "still there"))
+                "could not read a cpu setting for instance %s out of %s"
+                % (paths.instance, os.path.join(paths.root, "instance.sh")),
+                "check that instance.sh still sets AL_CPUS, and that "
+                "instances/%s.conf is readable" % paths.instance))
         else:
             found.append(Finding(
                 NOTE, "AIRLOCK_CPUS",
-                "%s defaults to %s cpu(s)"
-                % (paths.script("up.sh"), _fmt_number(up_default)),
-                "AIRLOCK_CPUS=3 bash %s throttles a long run; the older "
-                "SANDBOX_CPUS spelling is still read, after AIRLOCK_CPUS"
-                % paths.script("up.sh")))
+                "instance %s resolves to %s cpu(s)"
+                % (paths.instance, _fmt_number(up_default)),
+                "bash %s --instance %s --cpus 3 throttles a long run; "
+                "AIRLOCK_CPUS is read before the `cpus` key in "
+                "instances/%s.conf"
+                % (paths.script("up.sh"), paths.instance, paths.instance)))
         if env_cpus:
             found.append(Finding(
                 NOTE, "AIRLOCK_CPUS",
