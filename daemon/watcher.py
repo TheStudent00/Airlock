@@ -34,6 +34,27 @@ deliberate: concurrent heavy runs are what exhaust scratch space.
 NO EXTERNAL DEPENDENCIES. inotify is reached through ctypes so the image
 does not need pip packages for the daemon itself.
 
+HOW THE DOORBELL IS CHOSEN (AIRLOCK_WATCH, added 2026-09-02)
+    inotify is the default and is what this daemon has always used.
+
+    inotify has a PER-USER limit on how many inotify INSTANCES may exist at
+    once: /proc/sys/fs/inotify/max_user_instances, 128 on a stock Ubuntu.
+    Every editor, file manager, language server and podman process on the
+    machine holds some. When they are exhausted, inotify_init1 fails with
+    ENOSPC and the message reads "No space left on device" — which is about
+    instances, not about disk, and has misdirected at least one operator.
+
+    AIRLOCK_WATCH=poll replaces the doorbell with a directory scan every
+    POLL_INTERVAL seconds. It needs no kernel resource at all. It is OFF by
+    default because it is strictly worse: a lane waits up to one interval
+    before it starts, and a large /drop costs a listdir per interval.
+    Nothing else changes — the same lane runs, writes the same log, the
+    same status file and the same archive.
+
+    AIRLOCK_WATCH=auto tries inotify and falls back to polling with a loud
+    line in the log if the kernel refuses an instance. A run is never lost
+    to a resource the daemon could have done without.
+
 LOW PRIORITY (added 2026-08-22). Every lane script is niced (see LANE_NICE)
 before it execs, so a long probe run competes gently for CPU instead of
 holding every core at full tilt for hours. This is a fixed, simple cap —
@@ -65,6 +86,11 @@ TIMEOUT_SECONDS = int(os.environ.get("SCRIPT_TIMEOUT", "3600"))
 # Paired with the --cpus cap in up.sh so long probe runs leave the host
 # responsive for anything else run on it at the same time.
 LANE_NICE = int(os.environ.get("LANE_NICE", "15"))
+# "inotify" (default), "poll", or "auto". See the note at the top of this
+# file. up.sh sets this from the instance's `watch` key.
+WATCH_MODE = os.environ.get("AIRLOCK_WATCH", "inotify").strip().lower()
+# How often the polling doorbell rescans /drop, in seconds.
+POLL_INTERVAL = float(os.environ.get("AIRLOCK_POLL_INTERVAL", "2"))
 
 # ---- inotify constants (from linux/inotify.h) ---------------------------
 IN_CLOSE_WRITE = 0x00000008
@@ -120,6 +146,70 @@ class Inotify:
             if name:
                 out.append(name)
         return out
+
+
+class Poller:
+    """The doorbell that needs no kernel resource.
+
+    It holds the set of runnable names it has already reported and, every
+    POLL_INTERVAL seconds, reports whatever is in /drop and not in that
+    set. A name that ran and was archived out of /drop leaves the set too,
+    so a lane resubmitted under the same name is seen again.
+
+    read_events() has the same contract as Inotify.read_events(): it
+    blocks, then returns a list of names. The main loop cannot tell the
+    two apart.
+    """
+
+    def __init__(self, drop_dir, interval):
+        self.drop_dir = drop_dir
+        self.interval = interval
+        self.seen = set()
+
+    def _listing(self):
+        try:
+            return set(os.listdir(self.drop_dir))
+        except OSError:
+            return set()
+
+    def read_events(self):
+        while True:
+            time.sleep(self.interval)
+            present = self._listing()
+            self.seen &= present          # forget what is no longer there
+            fresh = sorted(n for n in present
+                           if is_runnable(n) and n not in self.seen)
+            if fresh:
+                self.seen |= set(fresh)
+                return fresh
+
+
+def open_watcher(drop_dir):
+    """Return the doorbell this daemon will use, and say which it is.
+
+    inotify  the default; fails loudly if the kernel has no instance left
+    poll     a directory scan; needs nothing from the kernel
+    auto     inotify, falling back to poll on the ENOSPC that means
+             "no inotify instances left", never on any other error
+    """
+    if WATCH_MODE == "poll":
+        log(f"watch mode: poll (every {POLL_INTERVAL}s) — no inotify instance used")
+        return Poller(drop_dir, POLL_INTERVAL)
+
+    try:
+        ino = Inotify()
+        ino.add_watch(drop_dir, IN_MOVED_TO | IN_CLOSE_WRITE)
+        log("watch mode: inotify (moved_to, close_write)")
+        return ino
+    except OSError as ex:
+        if WATCH_MODE != "auto" or ex.errno != errno.ENOSPC:
+            raise
+        log(f"WARNING: the kernel refused an inotify instance ({ex}).")
+        log("WARNING: this is the per-user limit in "
+            "/proc/sys/fs/inotify/max_user_instances, NOT disk space.")
+        log(f"WARNING: falling back to polling every {POLL_INTERVAL}s "
+            "(AIRLOCK_WATCH=auto).")
+        return Poller(drop_dir, POLL_INTERVAL)
 
 
 def _lower_priority():
@@ -244,8 +334,7 @@ def main():
     for d in (DROP_DIR, LOG_DIR, WORK_DIR, STATUS_DIR):
         os.makedirs(d, exist_ok=True)
 
-    ino = Inotify()
-    ino.add_watch(DROP_DIR, IN_MOVED_TO | IN_CLOSE_WRITE)
+    watcher = open_watcher(DROP_DIR)
     log(f"watching {DROP_DIR} (moved_to, close_write); logs -> {LOG_DIR}")
     log(f"status -> {STATUS_DIR}/<name>.status ; work free {free_mb(WORK_DIR)} MB")
     log(f"submit by renaming '.name.sh' -> 'name.sh', or by writing directly")
@@ -253,7 +342,7 @@ def main():
     sweep()  # catch anything present before we started
 
     while True:
-        for name in ino.read_events():
+        for name in watcher.read_events():
             if name is None:
                 sweep()
             elif is_runnable(name):
