@@ -13,32 +13,54 @@
 # The unit files live in the repo under quadlet/ and are copied to
 # ~/.config/containers/systemd/, which is the directory systemd reads.
 #
+# INSTANCES
+#   The four unit files in quadlet/ are TEMPLATES written for the default
+#   instance. This script renders them for whichever instance is named,
+#   substituting the instance's own container, network and volume names and
+#   its own caps from instances/<name>.conf, and installs them under that
+#   instance's names. The repo copies are never modified.
+#
+#   Two instances can therefore be installed side by side:
+#     systemctl --user status sandbox-runner
+#     systemctl --user status trickle-runner
+#
 # Usage:
-#   ./install_quadlet.sh            install and start
-#   ./install_quadlet.sh --remove   stop, disable, and remove the units
+#   ./install_quadlet.sh [--instance NAME]            install and start
+#   ./install_quadlet.sh [--instance NAME] --remove   stop, disable, remove
 set -uo pipefail
 cd "$(dirname "$0")"
+
+source "$(dirname "$0")/instance.sh"
+airlock_parse_instance "$@"
+set -- "${AIRLOCK_ARGV[@]}"
+airlock_instance_load "$(cd "$(dirname "$0")" && pwd)"
+
 UNITDIR="$HOME/.config/containers/systemd"
 
 # Everything this script prints also lands here, so a failure is readable
 # after the fact instead of scrolling away in the terminal.
 mkdir -p DevComms
-exec > >(tee DevComms/quadlet_install.txt) 2>&1
+exec > >(tee "DevComms/quadlet_install_${AL_INSTANCE}.txt") 2>&1
 trap 'sleep 0.3' EXIT   # let tee flush before the shell exits
-echo "# install_quadlet.sh — $(date -Iseconds)"
+echo "# install_quadlet.sh — instance $AL_INSTANCE — $(date -Iseconds)"
 
-UNITS=(sandbox-internal.network sandbox-egress.network
-       sandbox-proxy.container sandbox-runner.container)
+# The template in quadlet/, and the name it is installed under. The pairs
+# are identical for the default instance, which is why installing `sandbox`
+# writes exactly the files it always wrote.
+TEMPLATES=(sandbox-internal.network sandbox-egress.network
+           sandbox-proxy.container sandbox-runner.container)
+UNITS=("$AL_NET_INTERNAL.network" "$AL_NET_EGRESS.network"
+       "$AL_PROXY.container" "$AL_RUNNER.container")
 
 if [ "${1:-}" = "--remove" ]; then
-    systemctl --user stop sandbox-runner.service sandbox-proxy.service 2>/dev/null || true
-    systemctl --user stop sandbox-internal-network.service sandbox-egress-network.service 2>/dev/null || true
+    systemctl --user stop "$AL_RUNNER.service" "$AL_PROXY.service" 2>/dev/null || true
+    systemctl --user stop "$AL_NET_INTERNAL-network.service" "$AL_NET_EGRESS-network.service" 2>/dev/null || true
     for u in "${UNITS[@]}"; do rm -fv "$UNITDIR/$u"; done
     systemctl --user daemon-reload
     systemctl --user reset-failed 2>/dev/null || true
-    echo "removed. ./up.sh still works for manual running."
-    echo "note: the named volumes sandbox-logs and sandbox-out are kept."
-    echo "      remove them with: podman volume rm sandbox-logs sandbox-out"
+    echo "removed. ./up.sh --instance $AL_INSTANCE still works for manual running."
+    echo "note: the named volume $AL_PERSIST is kept."
+    echo "      remove it with: podman volume rm $AL_PERSIST"
     exit 0
 fi
 
@@ -60,14 +82,14 @@ fi
 # `podman run --network sandbox-egress` fails with exit 125.
 #
 # So: stop the network SERVICES first, and only then remove the networks.
-echo "  stopping any existing sandbox units"
-systemctl --user stop sandbox-runner.service sandbox-proxy.service 2>/dev/null || true
-systemctl --user stop sandbox-internal-network.service sandbox-egress-network.service 2>/dev/null || true
-systemctl --user reset-failed sandbox-runner.service sandbox-proxy.service 2>/dev/null || true
+echo "  stopping any existing units for instance $AL_INSTANCE"
+systemctl --user stop "$AL_RUNNER.service" "$AL_PROXY.service" 2>/dev/null || true
+systemctl --user stop "$AL_NET_INTERNAL-network.service" "$AL_NET_EGRESS-network.service" 2>/dev/null || true
+systemctl --user reset-failed "$AL_RUNNER.service" "$AL_PROXY.service" 2>/dev/null || true
 
-echo "  removing containers and networks"
-podman rm -f sandbox-runner sandbox-proxy 2>/dev/null >/dev/null || true
-podman network rm sandbox-internal sandbox-egress 2>/dev/null >/dev/null || true
+echo "  removing this instance's containers and networks"
+podman rm -f "$AL_RUNNER" "$AL_PROXY" 2>/dev/null >/dev/null || true
+podman network rm "$AL_NET_INTERNAL" "$AL_NET_EGRESS" 2>/dev/null >/dev/null || true
 
 # ---- the agent lane ------------------------------------------------------
 # The runner unit ships with an EMPTY agent-lane block, because Airlock
@@ -75,10 +97,11 @@ podman network rm sandbox-internal sandbox-egress 2>/dev/null >/dev/null || true
 # are generated here, from this repo's own absolute location, and spliced
 # into the INSTALLED copy. The repo copy is never modified.
 REPO="$(pwd)"
-AGENT_LINES="$(printf 'Volume=%s/agent/%s:/%s\n' \
-    "$REPO" drop drop "$REPO" out out "$REPO" logs logs "$REPO" status status)"
-mkdir -p "$REPO"/agent/{drop,out,logs,status}
-echo "  agent lane bound from $REPO/agent:"
+AGENT_LINES="$(printf 'Volume=%s/%s:/%s\n' \
+    "$AL_AGENT_DIR" drop drop "$AL_AGENT_DIR" out out \
+    "$AL_AGENT_DIR" logs logs "$AL_AGENT_DIR" status status)"
+mkdir -p "$AL_AGENT_DIR"/{drop,out,logs,status}
+echo "  agent lane bound from $AL_AGENT_DIR:"
 echo "$AGENT_LINES" | sed 's/^Volume=/    /'
 
 # ---- configured mounts ---------------------------------------------------
@@ -90,7 +113,7 @@ echo "$AGENT_LINES" | sed 's/^Volume=/    /'
 # would otherwise create an empty directory at that path and the run would
 # "succeed" against nothing, which is the failure that wastes an hour.
 render_mounts() {   # -> stdout, the Volume= lines
-    local conf="mounts.conf" line host cpath mode expanded bad=0
+    local conf="$AL_MOUNTS_FILE" line host cpath mode expanded bad=0
     [ -f "$conf" ] || return 0
     while IFS= read -r line || [ -n "$line" ]; do
         line="${line%%#*}"
@@ -113,25 +136,50 @@ render_mounts() {   # -> stdout, the Volume= lines
 }
 
 MOUNT_LINES="$(render_mounts)" || {
-    echo "  refusing to install: fix mounts.conf and re-run" >&2
+    echo "  refusing to install: fix $AL_MOUNTS_FILE and re-run" >&2
     exit 1
 }
 if [ -z "$MOUNT_LINES" ]; then
-    if [ -f mounts.conf ]; then
-        echo "  note: mounts.conf has no entries — the runner will see only"
+    if [ -f "$AL_MOUNTS_FILE" ]; then
+        echo "  note: $AL_MOUNTS_FILE has no entries — the runner will see only"
         echo "        the agent lane (/drop, /out, /logs, /status)."
     else
-        echo "  note: no mounts.conf — copy mounts.conf.example to mounts.conf"
+        echo "  note: no $AL_MOUNTS_FILE — copy mounts.conf.example to it"
         echo "        to expose project directories. The agent lane still works."
     fi
 else
-    echo "  mounts from mounts.conf:"
+    echo "  mounts from $AL_MOUNTS_FILE:"
     echo "$MOUNT_LINES" | sed 's/^Volume=/    /'
 fi
 
+# render_instance reads a template on stdin and writes the instance's own
+# unit on stdout: every `sandbox-` name becomes this instance's name, and
+# the caps come from instances/<name>.conf. For the default instance every
+# substitution is a no-op, so the installed file is byte-identical to the
+# template plus the generated blocks — which is what it has always been.
+render_instance() {
+    sed -e "s|sandbox-internal|$AL_NET_INTERNAL|g" \
+        -e "s|sandbox-egress|$AL_NET_EGRESS|g" \
+        -e "s|localhost/sandbox-runner:latest|localhost/$AL_RUNNER_IMAGE|g" \
+        -e "s|localhost/sandbox-proxy:latest|localhost/$AL_PROXY_IMAGE|g" \
+        -e "s|sandbox-runner|$AL_RUNNER|g" \
+        -e "s|sandbox-proxy|$AL_PROXY|g" \
+        -e "s|^Volume=sandbox-persist:/persist$|Volume=$AL_PERSIST:/persist:$AL_PERSIST_MODE|" \
+        -e "s|^Memory=12g$|Memory=$AL_MEMORY|" \
+        -e "s|^Memory=512m$|Memory=$AL_PROXY_MEMORY|" \
+        -e "s|^PidsLimit=2048$|PidsLimit=$AL_PIDS|" \
+        -e "s|^PidsLimit=256$|PidsLimit=$AL_PROXY_PIDS|" \
+        -e "s|^Tmpfs=/tmp:rw,nosuid,nodev,size=2g$|Tmpfs=/tmp:rw,nosuid,nodev,size=$AL_TMP_SIZE|" \
+        -e "s|^Tmpfs=/work:rw,nosuid,nodev,size=4g$|Tmpfs=/work:rw,nosuid,nodev,size=$AL_WORK_SIZE|" \
+        -e "s|^PodmanArgs=--cpus=6$|PodmanArgs=--cpus=$AL_CPUS|" \
+        -e "s|^PodmanArgs=--cpus=1$|PodmanArgs=--cpus=$AL_PROXY_CPUS|"
+}
+
 mkdir -p "$UNITDIR"
-for u in "${UNITS[@]}"; do
-    if [ "$u" = "sandbox-runner.container" ]; then
+for i in "${!UNITS[@]}"; do
+    t="${TEMPLATES[$i]}"
+    u="${UNITS[$i]}"
+    if [ "$t" = "sandbox-runner.container" ]; then
         # Splice the generated block between the markers. awk rather than
         # sed: the mount lines contain slashes, and quoting them into a
         # sed replacement is how this kind of thing breaks silently.
@@ -141,12 +189,13 @@ for u in "${UNITS[@]}"; do
             /^# >>> MOUNTS$/ { print; if (block != "") print block; skip=1; next }
             /^# <<< MOUNTS$/ { skip=0 }
             !skip { print }
-        ' "quadlet/$u" > "$UNITDIR/$u"
+        ' "quadlet/$t" | render_instance > "$UNITDIR/$u"
         chmod 0644 "$UNITDIR/$u"
     else
-        install -m 0644 "quadlet/$u" "$UNITDIR/$u"
+        render_instance < "quadlet/$t" > "$UNITDIR/$u"
+        chmod 0644 "$UNITDIR/$u"
     fi
-    echo "  installed $UNITDIR/$u"
+    echo "  installed $UNITDIR/$u   (from quadlet/$t)"
 done
 
 systemctl --user daemon-reload
@@ -154,7 +203,7 @@ systemctl --user daemon-reload
 # Bring the networks up explicitly before the containers, so a failure
 # here is reported as a network problem rather than as a container one.
 echo "  starting networks"
-for n in sandbox-internal-network sandbox-egress-network; do
+for n in "$AL_NET_INTERNAL-network" "$AL_NET_EGRESS-network"; do
     if systemctl --user start "$n.service"; then
         echo "    $n.service started"
     else
@@ -166,7 +215,7 @@ echo "  networks known to podman now:"
 podman network ls --format '    {{.Name}}'
 
 echo "  starting containers"
-for s in sandbox-proxy sandbox-runner; do
+for s in "$AL_PROXY" "$AL_RUNNER"; do
     if systemctl --user start "$s.service"; then
         echo "    $s.service started"
     else
@@ -178,16 +227,16 @@ done
 
 echo
 echo "=== unit status ==="
-systemctl --user --no-pager --lines=0 status sandbox-proxy.service sandbox-runner.service \
-    | grep -E 'sandbox-|Active:' | sed 's/^/  /'
+systemctl --user --no-pager --lines=0 status "$AL_PROXY.service" "$AL_RUNNER.service" \
+    | grep -E "${AL_INSTANCE}-|Active:" | sed 's/^/  /'
 echo
-podman ps --filter name=sandbox- --format '  {{.Names}}  {{.Status}}'
+podman ps --filter "name=^${AL_INSTANCE}-" --format '  {{.Names}}  {{.Status}}'
 echo
 echo "From here on:"
-echo "  systemctl --user restart sandbox-runner"
-echo "  systemctl --user status  sandbox-runner"
-echo "  journalctl --user -u sandbox-runner -f"
+echo "  systemctl --user restart $AL_RUNNER"
+echo "  systemctl --user status  $AL_RUNNER"
+echo "  journalctl --user -u $AL_RUNNER -f"
 echo
 echo "airlock, submit.sh, submit_project.sh, logs.sh, allow.sh, pull.sh"
 echo "all still work."
-echo "Verify with:  ./selftest.sh"
+echo "Verify with:  ./selftest.sh --instance $AL_INSTANCE"
