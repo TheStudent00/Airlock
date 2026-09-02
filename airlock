@@ -640,7 +640,8 @@ class Doctor:
 
     def run(self, paths):
         """Run every check in order, accumulating into self.findings."""
-        for check in (Doctor.check_container, Doctor.check_cores,
+        for check in (Doctor.check_instances,
+                      Doctor.check_container, Doctor.check_cores,
                       Doctor.check_drop_clean, Doctor.check_toolchains,
                       Doctor.check_allowlist, Doctor.check_disk):
             try:
@@ -651,6 +652,40 @@ class Doctor:
                     "the check itself failed: %s" % ex,
                     "report this; the remaining checks still ran"))
         return self.findings
+
+    @staticmethod
+    def check_instances(paths):
+        """Which instances this install knows about, and which are running.
+
+        An instance is one running sandbox. `sandbox` always exists — every
+        one of its settings has a built-in default — and each
+        instances/<name>.conf adds another. This is the check that answers
+        "what else is running beside the one I asked about", which is the
+        question a second sandbox makes possible to get wrong.
+        """
+        known = [DEFAULT_INSTANCE]
+        conf_dir = os.path.join(paths.root, "instances")
+        if os.path.isdir(conf_dir):
+            for entry in sorted(os.listdir(conf_dir)):
+                if not entry.endswith(".conf") or entry.endswith(".conf.example"):
+                    continue
+                name = entry[:-len(".conf")]
+                if name not in known:
+                    known.append(name)
+
+        rows = []
+        for name in known:
+            runner = "%s-runner" % name
+            state = podman_inspect(runner, "{{.State.Status}}") or "absent"
+            mark = " <- this command" if name == paths.instance else ""
+            rows.append("%s (%s: %s)%s" % (name, runner, state, mark))
+
+        return [Finding(
+            NOTE, "instances",
+            "%d known: %s" % (len(known), "; ".join(rows)),
+            "airlock --instance <name> <command>, or bash %s --instance "
+            "<name>; a new instance is a new instances/<name>.conf (see "
+            "instances/sandbox.conf.example)" % paths.script("up.sh"))]
 
     @staticmethod
     def check_container(paths):
