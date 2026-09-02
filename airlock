@@ -46,8 +46,54 @@ OK = "OK"
 SEVERITY_ORDER = {REFUSE: 0, FAULT: 1, WARN: 2, NOTE: 3, OK: 4}
 BLOCKING = (REFUSE, FAULT)
 
+# ---- the instance ---------------------------------------------------------
+# An INSTANCE is one running sandbox. Its container, network and volume
+# names are DERIVED from its name; the derivation lives in ./instance.sh and
+# this program reads it from there rather than spelling any name itself, so
+# there is exactly one place a name is decided.
+#
+# RUNNER and PROXY below are placeholders holding the DEFAULT instance's
+# names. main() overwrites them from the resolved instance before any
+# command runs. Nothing else in this file spells a container name.
+DEFAULT_INSTANCE = "sandbox"
+INSTANCE = DEFAULT_INSTANCE
 RUNNER = "sandbox-runner"
 PROXY = "sandbox-proxy"
+
+
+def load_instance(root, instance):
+    """Every AL_* setting for one instance, as a dict, read from instance.sh.
+
+    The shell library is the single source of the derivation: this asks it
+    rather than reimplementing it, so a name or a default can never drift
+    between the CLI and the scripts. Returns {} if it cannot be read, and
+    every caller falls back to the built-in default in that case.
+    """
+    library = os.path.join(root, "instance.sh")
+    if not os.path.isfile(library):
+        return {}
+    script = (
+        'set -e\n'
+        'source "$1"\n'
+        'AIRLOCK_INSTANCE="$2"\n'
+        'airlock_instance_load "$3"\n'
+        'env | grep "^AL_"\n'
+    )
+    try:
+        result = subprocess.run(
+            ["bash", "-c", script, "bash", library, instance, root],
+            capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    if result.returncode != 0:
+        return {}
+    settings = {}
+    for line in result.stdout.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        settings[key] = value
+    return settings
 
 # A lane is expected to print its own progress as [n/total]; progress.sh
 # reads exactly that to compute the current lane's percentage and ETA.
@@ -150,21 +196,37 @@ class Finding:
 class Paths:
     """Every path the CLI reads, writes or names, resolved from one root."""
 
-    def __init__(self, root):
+    def __init__(self, root, instance=DEFAULT_INSTANCE):
         self.root = os.path.abspath(root)
-        agent = os.path.join(self.root, "agent")
+        self.instance = instance
+        self.settings = load_instance(self.root, instance)
+        agent = self.settings.get(
+            "AL_AGENT_DIR",
+            os.path.join(self.root, "agent") if instance == DEFAULT_INSTANCE
+            else os.path.join(self.root, "instances", instance, "agent"))
+        self.agent = agent
         self.drop = os.path.join(agent, "drop")
         self.done = os.path.join(self.drop, ".done")
         self.status = os.path.join(agent, "status")
         self.logs = os.path.join(agent, "logs")
         self.out = os.path.join(agent, "out")
         self.batch_file = os.path.join(agent, "batch.json")
-        self.allowlist = os.path.join(self.root, "proxy", "allowlist.txt")
-        self.quadlet_runner = os.path.join(
+        self.allowlist = self.settings.get(
+            "AL_ALLOWLIST",
+            os.path.join(self.root, "proxy", "allowlist.txt"))
+        self.runner = self.settings.get("AL_RUNNER", instance + "-runner")
+        self.proxy = self.settings.get("AL_PROXY", instance + "-proxy")
+        # The systemd unit this instance would be installed as, if it has
+        # been installed; otherwise the template it would be rendered from.
+        installed = os.path.join(
+            os.path.expanduser("~/.config/containers/systemd"),
+            "%s.container" % self.runner)
+        template = os.path.join(
             self.root, "quadlet", "sandbox-runner.container")
+        self.quadlet_runner = installed if os.path.isfile(installed) else template
 
     @staticmethod
-    def resolve(root_flag=None):
+    def resolve(root_flag=None, instance=None):
         """Build a Paths from the first root that is named.
 
         Precedence: --root, then AIRLOCK_ROOT, then SANDBOX_DESIGN_ROOT,
@@ -180,7 +242,10 @@ class Paths:
                 or os.environ.get("SANDBOX_DESIGN_ROOT"))
         if not root:
             root = self_root()
-        return Paths(root)
+        name = (instance
+                or os.environ.get("AIRLOCK_INSTANCE")
+                or DEFAULT_INSTANCE)
+        return Paths(root, name)
 
     def script(self, name):
         """Full path of a shell script in the root. Joins self.root."""
@@ -1023,7 +1088,9 @@ def delegate(paths, script_name, args):
         print("        this CLI never spells podman flags itself; it runs "
               "that file.", file=sys.stderr)
         return 2
-    command = ["bash", target] + list(args)
+    # Every shell script takes --instance, so the instance the CLI resolved
+    # is the instance the script acts on. Spelled once, here.
+    command = ["bash", target, "--instance", paths.instance] + list(args)
     print("running: %s" % " ".join(command))
     print("(this CLI delegates so container flags have one source of truth: "
           "%s)" % target)
@@ -1456,6 +1523,12 @@ def usage():
           "SANDBOX_DESIGN_ROOT after it for anyone migrating from "
           "SandboxDesign. Precedence: --root, then AIRLOCK_ROOT, then "
           "SANDBOX_DESIGN_ROOT, then the directory this file lives in"],
+         ["--instance <name>",
+          "which sandbox to act on. Also AIRLOCK_INSTANCE. The default "
+          "instance is `sandbox` and its names are unchanged: "
+          "sandbox-runner, sandbox-proxy, sandbox-internal, sandbox-egress. "
+          "A second instance runs beside it with every name derived from "
+          "its own; its settings live in instances/<name>.conf"],
          ["--help, -h, help", "this text"]])
     print()
     print("what this program does NOT do:")
@@ -1472,7 +1545,7 @@ def usage():
 
 def main(argv):
     """Parse the global flags, dispatch one command, return an exit code."""
-    args, root_flag = [], None
+    args, root_flag, instance_flag = [], None, None
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -1482,6 +1555,14 @@ def main(argv):
                 print("REFUSE: --root needs a directory", file=sys.stderr)
                 return 2
             root_flag = argv[index]
+        elif token == "--instance":
+            index += 1
+            if index >= len(argv):
+                print("REFUSE: --instance needs a name", file=sys.stderr)
+                return 2
+            instance_flag = argv[index]
+        elif token.startswith("--instance="):
+            instance_flag = token.split("=", 1)[1]
         elif token in ("--help", "-h"):
             return usage()
         else:
@@ -1500,11 +1581,22 @@ def main(argv):
         print("REFUSE: --root is not a directory: %s"
               % os.path.abspath(root_flag), file=sys.stderr)
         return 2
-    paths = Paths.resolve(root_flag)
+    paths = Paths.resolve(root_flag, instance_flag)
     if not os.path.isdir(paths.root):
         print("REFUSE: no Airlock tree at %s" % paths.root,
               file=sys.stderr)
         return 2
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", paths.instance):
+        print("REFUSE: instance name is not [A-Za-z0-9_-]+: %s"
+              % paths.instance, file=sys.stderr)
+        return 2
+
+    # The one assignment that makes every container reference below name
+    # THIS instance's containers.
+    global INSTANCE, RUNNER, PROXY
+    INSTANCE = paths.instance
+    RUNNER = paths.runner
+    PROXY = paths.proxy
 
     table = {"up": up, "down": down, "submit": submit, "status": status,
              "watch": watch, "allow": allow, "doctor": doctor}
