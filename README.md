@@ -36,6 +36,7 @@ contract](#the-contract) below.
 | [Getting started](#getting-started) | first run, in order |
 | [Using this from a project](#using-this-from-a-project) | what a project-side caller looks like today |
 | [Progress, and the batch manifest](#progress-and-the-batch-manifest) | weighted completion and ETA across a set of lanes |
+| [Instances](#instances) | running two or more sandboxes from one install |
 | [Configuration](#configuration) | every knob, its default, where it lives |
 | [The image inventory](#the-image-inventory) | what toolchains are baked in, verified |
 | [Running it under systemd](#running-it-under-systemd) | surviving reboots |
@@ -333,25 +334,135 @@ exactly this reason.
 exactly as it otherwise does, plus one line noting the absence; a
 missing or malformed manifest never makes it fail.
 
+## Instances
+
+An **instance** is one running sandbox: its own runner container, its own
+proxy, its own networks, its own agent lane, its own caps. One Airlock
+install runs as many as you ask for, side by side.
+
+```
+bash ./up.sh                                    the default instance, `sandbox`
+bash ./up.sh --instance trickle --cpus 6        a second one, beside it
+./airlock --instance trickle submit lane.sh --batch regen --weight 400
+bash ./progress.sh --instance trickle -w
+bash ./down.sh --instance trickle               takes down only that one
+./airlock doctor                                lists every instance
+```
+
+**Airlock is never copied to get a second sandbox.** Before instances, a
+project that needed one cloned this repo and rewrote the names in it — a
+fork, with the tool's own bug fixes stranded on one side of it. That is
+what an instance replaces.
+
+### Every name comes from the instance name
+
+| thing | name |
+|---|---|
+| runner container | `<instance>-runner` |
+| proxy container | `<instance>-proxy` |
+| internal network | `<instance>-internal` |
+| egress network | `<instance>-egress` |
+| systemd units | `<instance>-runner.service`, and so on |
+| agent lane | `agent/` for `sandbox`; `instances/<name>/agent/` for any other |
+
+The derivation lives in **one file, `instance.sh`**, and nothing else spells
+a container name. Every script sources it; the `airlock` CLI asks it rather
+than reimplementing it, so the CLI and the scripts can never drift apart.
+
+The default instance is `sandbox`, and its names are the names Airlock has
+always used — `sandbox-runner`, `sandbox-proxy`, `sandbox-internal`,
+`sandbox-egress`, `sandbox-persist`. An install that never names an instance
+behaves exactly as it did before instances existed.
+
+### An instance's settings
+
+`instances/<name>.conf`, one `key = value` per line, `#` comments. **Every
+key is optional**: what is not written falls back to the built-in default,
+which is the value Airlock hardcoded before instances existed. The file is
+per-machine and gitignored, exactly like `mounts.conf`. Copy
+`instances/sandbox.conf.example` and edit.
+
+A whole second sandbox is that file plus a flag. This one runs at half a
+twelve-core machine, with no route out at all, sharing the default
+instance's toolchain volume read-only:
+
+```
+cpus            = 6
+memory          = 8g
+proxy           = no
+persist_volume  = sandbox-persist
+persist_mode    = ro
+```
+
+### The image is shared, so a second instance never forces a rebuild
+
+`runner_image` defaults to `sandbox-runner:latest` for **every** instance,
+because an image is a build artifact rather than instance state. A second
+instance starts on the image the first one built. Override it only if you
+deliberately built a different one.
+
+### Two instances cannot collide
+
+They share no container, no network and no drop folder. `up.sh` refuses to
+reuse a runner bound to a different agent tree, by name, rather than
+silently watching the wrong folder. `airlock doctor` lists every instance
+and whether each one is running, so "what else is on this machine" is never
+a guess.
+
 ## Configuration
 
 | setting | default | where it lives | how to change it |
 |---|---|---|---|
-| `AIRLOCK_CPUS` | **6** — the full share. Ruled 2026-08-22: the default is full, and the user throttles as they see fit | read by `up.sh` at container start | `AIRLOCK_CPUS=3 bash ./up.sh` throttles a long run so it does not hold every core hot for hours; roughly halving the cores roughly doubles the wall clock. A fixed share, not a feedback loop. `SANDBOX_CPUS` is the older spelling and is still read, **after** `AIRLOCK_CPUS` |
-| runner memory | `12g` | `--memory` in `up.sh`; `Memory=12g` in `quadlet/sandbox-runner.container` | edit both — they are not derived from one source |
-| proxy memory / CPU | `512m` / `1` cpu | `up.sh` and `quadlet/sandbox-proxy.container` | fixed; the proxy does no compute work |
-| `/tmp` tmpfs cap | `2g` | `--tmpfs` in `up.sh`; `Tmpfs=` in the quadlet unit | raise deliberately if a run needs more |
-| `/work` tmpfs cap | `4g` | same as above | same. This is also where `submit_project.sh` copies a project in, so a multi-gigabyte copy-in needs the cap raised first, or should use a read-only mount instead of a copy |
-| `LANE_NICE` | `15` | env var read by `daemon/watcher.py`, applied via `os.nice()` before each lane execs | set it on the container. A lane still competes for CPU under the cpu cap, just gently |
-| `SCRIPT_TIMEOUT` | `3600` seconds | env var read by `daemon/watcher.py` | set it on the container. On expiry the OS stops the run; the daemon records its own token in the status file and `airlock status` renders the outcome as **ABORT** |
+| `AIRLOCK_CPUS` | **6** — the full share. Ruled 2026-08-22: the default is full, and the user throttles as they see fit | resolved by `instance.sh` at container start. Precedence: `up.sh --cpus N`, then `AIRLOCK_CPUS`, then `SANDBOX_CPUS`, then the `cpus` key in `instances/<name>.conf`, then 6 | `AIRLOCK_CPUS=3 bash ./up.sh` throttles a long run so it does not hold every core hot for hours; roughly halving the cores roughly doubles the wall clock. A fixed share, not a feedback loop. `SANDBOX_CPUS` is the older spelling and is still read, **after** `AIRLOCK_CPUS` |
+| runner memory | `12g` | the `memory` key in `instances/<name>.conf` | one place. `up.sh` reads it, and `install_quadlet.sh` renders it into the systemd unit it installs, so the manual and the systemd path can no longer disagree |
+| proxy memory / CPU | `512m` / `1` cpu | the `proxy_memory` and `proxy_cpus` keys | the proxy does no compute work; raising these is rarely useful |
+| `/tmp` tmpfs cap | `2g` | the `tmp_size` key | raise deliberately if a run needs more |
+| `/work` tmpfs cap | `4g` | the `work_size` key | same. This is also where `submit_project.sh` copies a project in, so a multi-gigabyte copy-in needs the cap raised first, or should use a read-only mount instead of a copy |
+| `LANE_NICE` | `15` | the `lane_nice` key; read by `daemon/watcher.py` and applied via `os.nice()` before each lane execs | set it per instance. A lane still competes for CPU under the cpu cap, just gently |
+| `SCRIPT_TIMEOUT` | `3600` seconds | the `script_timeout` key; read by `daemon/watcher.py` | set it per instance. On expiry the OS stops the run; the daemon records its own token in the status file and `airlock status` renders the outcome as **ABORT** |
+| `AIRLOCK_INSTANCE` | `sandbox` — the default instance | env var read by `instance.sh` and by `airlock` | `--instance <name>` on any script or on `airlock` overrides it. Every container, network, volume and unit name is derived from it in `instance.sh`, and nowhere else |
+| `instances/<name>.conf` | absent — every key falls back to its built-in default | `<airlock>/instances/`, gitignored, per-machine | `cp instances/sandbox.conf.example instances/<name>.conf` and edit. Keys: `cpus`, `memory`, `pids_limit`, `tmp_size`, `work_size`, `proxy`, `proxy_memory`, `proxy_cpus`, `proxy_pids_limit`, `allowlist_file`, `mounts_file`, `agent_dir`, `runner_image`, `proxy_image`, `persist_volume`, `persist_mode`, `lane_nice`, `script_timeout`, `watch`, `daemon_file` |
+| `proxy` (per instance) | `yes` | the `proxy` key in `instances/<name>.conf` | `proxy = no` starts no proxy and no egress network: the instance has **no route out at all**. `selftest.sh` reports checks 4–6 as SKIP for such an instance instead of a verdict it cannot reach |
+| `persist_volume` / `persist_mode` | `<instance>-persist`, `rw` | same file | point a second instance at another instance's volume with `persist_mode = ro` to share a toolchain it must not be able to alter |
+| `AIRLOCK_WATCH` | `inotify` | the `watch` key in `instances/<name>.conf`; read by `daemon/watcher.py` | `poll` rescans `/drop` every `AIRLOCK_POLL_INTERVAL` seconds (default 2) and uses **no inotify resource at all**. `auto` tries inotify and falls back to polling, loudly, only on the ENOSPC that means the kernel has none left. See [When inotify runs out](#when-inotify-runs-out) |
+| `daemon_file` | unset — the daemon baked into the image runs | the `daemon_file` key in `instances/<name>.conf` | names a host file to bind read-only over `/opt/daemon/watcher.py`. It exists because the daemon is part of the image: a change to `daemon/watcher.py` otherwise needs a full rebuild before any instance can use it. Drop the key after the next `build.sh` |
 | `AIRLOCK_ROOT` | unset — `airlock` uses its own directory | env var read by `airlock` | export it to point a project at a particular Airlock tree. `--root` overrides it; `SANDBOX_DESIGN_ROOT` is read after it |
-| `mounts.conf` | none — no host directory is exposed | `<airlock>/mounts.conf`, gitignored, per-machine | `cp mounts.conf.example mounts.conf` and edit. One `<host>:<container>[:mode]` per line, default read-only. **This file is the only place a real path is ever named**, and it is never committed |
-| egress allowlist | none until you copy the example — the proxy default-denies | `<airlock>/proxy/allowlist.txt`, gitignored, per-machine | `cp proxy/allowlist.txt.example proxy/allowlist.txt`, then `bash ./allow.sh add <hostname>...`, which rewrites the file and reloads squid without restarting the container |
+| `mounts.conf` | none — no host directory is exposed | `<airlock>/mounts.conf`, gitignored, per-machine; an instance may name a different file with `mounts_file` | `cp mounts.conf.example mounts.conf` and edit. One `<host>:<container>[:mode]` per line, default read-only. **This file is the only place a real path is ever named**, and it is never committed |
+| egress allowlist | none until you copy the example — the proxy default-denies | `<airlock>/proxy/allowlist.txt`, gitignored, per-machine; every instance shares it unless one names its own with `allowlist_file` | `cp proxy/allowlist.txt.example proxy/allowlist.txt`, then `bash ./allow.sh add <hostname>...`, which rewrites the file and reloads squid without restarting the container |
 
-`up.sh`'s default and `quadlet/sandbox-runner.container`'s
-`PodmanArgs=--cpus=6` are set to agree, so the manual and the
-systemd-managed sandbox run at the same speed. `airlock doctor` compares
-them on every run and reports a WARN if they ever drift apart.
+An instance's cpu setting is resolved in one place, and
+`install_quadlet.sh` renders it into the systemd unit it installs, so the
+manual and the systemd-managed sandbox run at the same speed by
+construction. `airlock doctor` still compares the two on every run and
+reports a WARN if they ever drift apart.
+
+### When inotify runs out
+
+The daemon's doorbell is inotify, and inotify has two per-user kernel
+limits: how many **instances** may exist (`max_user_instances`, 128 on a
+stock Ubuntu) and how many **watches** (`max_user_watches`, 65,536). An
+editor indexing a large tree can hold tens of thousands of watches on its
+own. When either is exhausted the call fails with `ENOSPC`, whose message
+reads **"No space left on device"** — which is about the limit, not about
+disk, and has misdirected at least one operator into diagnosing storage.
+
+Measured on one machine, 2026-09-02, with the daemon refusing to start:
+
+```
+inotify INSTANCES open : 114 / 128
+inotify WATCHES held   : 65470 / 65536
+   62684 watches  <one editor>
+```
+
+`watch = poll` in an instance's conf replaces the doorbell with a `/drop`
+rescan every two seconds. It needs no kernel resource at all. It is **off by
+default** because it is strictly worse — a lane waits up to one interval
+before starting — and nothing else about a run changes: same lane, same log,
+same status file, same archive. `watch = auto` takes inotify when it can and
+falls back with three loud log lines when it cannot.
+
+Raising a kernel limit is a system settings change and Airlock never makes
+one.
 
 ## The image inventory
 
@@ -420,12 +531,17 @@ a per-run configuration change.
                     internet
 ```
 
-The container, network and volume names keep the `sandbox-` prefix they
-were built with. They were never the project-specific part, and renaming
-them would have meant rewriting eight scripts and forcing an image
-rebuild on everyone migrating. **Consequence: do not run Airlock and a
-SandboxDesign install at the same time** — they would fight over the
-same container names. See `MIGRATING.md`.
+The names above are the **default instance**'s. Every one of them is
+derived from the instance name in `instance.sh`: a second instance named
+`trickle` is `trickle-runner` on `trickle-internal` behind `trickle-proxy`,
+running beside the first from the same install and the same image. See
+[Instances](#instances).
+
+The default instance keeps the `sandbox-` prefix it was built with, so
+nothing that already uses Airlock has to change. **Consequence: do not run
+Airlock's default instance and a SandboxDesign install at the same time** —
+they would fight over the same container names. Naming an instance is now
+the way out of that too. See `MIGRATING.md`.
 
 ## Running it under systemd
 
@@ -509,6 +625,8 @@ which is the *fix* for a leaked mailbox and has to stay quotable.
 | file | what it is |
 |---|---|
 | `airlock` | the CLI. python3, stdlib only, executable |
+| `instance.sh` | **the one place an instance's names and caps are derived.** Sourced by every shell script; read by `airlock` rather than reimplemented |
+| `instances/sandbox.conf.example` | the template for `instances/<name>.conf`. The real `.conf` files, and each instance's own `instances/<name>/` tree, are per-machine and gitignored |
 | `Containerfile` | the runner image; toolchains listed above |
 | `daemon/watcher.py` | the hot-folder daemon. inotify through ctypes, no pip dependencies; writes `/status/<name>.status` per run and records `/work` headroom |
 | `agent/` | the unattended lane: `drop/ status/ logs/ out/` bound from the host. See `agent/README.md` |
