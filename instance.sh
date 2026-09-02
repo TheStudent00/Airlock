@@ -207,6 +207,20 @@ airlock_instance_load() {
     # poll exists for a machine that has run out of inotify INSTANCES, which
     # is a per-user kernel limit (/proc/sys/fs/inotify/max_user_instances)
     # and is nothing to do with disk space, despite the ENOSPC it reports.
+    # `daemon_file` runs the daemon from a file on the host instead of the
+    # copy baked into the image, by binding it read-only over
+    # /opt/daemon/watcher.py. It is UNSET by default, so the image's own
+    # daemon is what runs and no instance's container spec changes.
+    #
+    # It exists because the daemon is part of the image: a change to
+    # daemon/watcher.py otherwise needs a full image rebuild before any
+    # instance can use it. Set `daemon_file = daemon/watcher.py` to run the
+    # repo's copy now, and drop the key again after the next build.sh.
+    AL_DAEMON_FILE="$(_airlock_conf_get "$AL_CONF" daemon_file)"
+    if [ -n "$AL_DAEMON_FILE" ]; then
+        AL_DAEMON_FILE="$(_airlock_abs "$AL_DAEMON_FILE" "$AL_ROOT")"
+    fi
+
     AL_WATCH="$(_airlock_pick "$(_airlock_conf_get "$AL_CONF" watch)" "inotify")"
     case "$AL_WATCH" in
         poll|polling) AL_WATCH="poll" ;;
@@ -220,7 +234,7 @@ airlock_instance_load() {
     export AL_CPUS AL_MEMORY AL_PIDS AL_TMP_SIZE AL_WORK_SIZE
     export AL_PROXY_MEMORY AL_PROXY_CPUS AL_PROXY_PIDS AL_USE_PROXY
     export AL_MOUNTS_FILE AL_ALLOWLIST
-    export AL_LANE_NICE AL_SCRIPT_TIMEOUT AL_WATCH
+    export AL_LANE_NICE AL_SCRIPT_TIMEOUT AL_WATCH AL_DAEMON_FILE
     return 0
 }
 
