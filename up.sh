@@ -161,6 +161,21 @@ else
     PROXY_ENV=(-e "http_proxy=" -e "https_proxy=" -e "HTTP_PROXY=" -e "HTTPS_PROXY=")
 fi
 
+# ---- the daemon this instance runs ---------------------------------------
+# Unset by default: the daemon baked into the image is what runs, and the
+# container spec is exactly what it always was. An instance that names
+# `daemon_file` binds that host file read-only over the image's copy, which
+# is how a daemon change reaches a running instance without a rebuild.
+DAEMON_ARGS=()
+if [ -n "${AL_DAEMON_FILE:-}" ]; then
+    if [ ! -f "$AL_DAEMON_FILE" ]; then
+        echo "  DAEMON ERROR: no such file: $AL_DAEMON_FILE (daemon_file in $AL_CONF)" >&2
+        exit 1
+    fi
+    DAEMON_ARGS=(-v "$AL_DAEMON_FILE:/opt/daemon/watcher.py:ro")
+    echo "  daemon:   $AL_DAEMON_FILE (bound over the image's copy)"
+fi
+
 # ---- runner --------------------------------------------------------------
 # An existing container is STARTED, never rebound: podman fixes a container's
 # binds when it is created. So before reusing one, check that it is bound to
@@ -200,6 +215,7 @@ else
         -v "$AGENT_DIR/status":/status \
         "${MOUNT_ARGS[@]}" \
         -v "$AL_PERSIST:/persist:$AL_PERSIST_MODE" \
+        "${DAEMON_ARGS[@]}" \
         "${PROXY_ENV[@]}" \
         -e "LANE_NICE=$AL_LANE_NICE" \
         -e "SCRIPT_TIMEOUT=$AL_SCRIPT_TIMEOUT" \
