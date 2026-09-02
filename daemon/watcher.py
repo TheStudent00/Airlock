@@ -193,7 +193,8 @@ def open_watcher(drop_dir):
              "no inotify instances left", never on any other error
     """
     if WATCH_MODE == "poll":
-        log(f"watch mode: poll (every {POLL_INTERVAL}s) — no inotify instance used")
+        log(f"watch mode: poll (rescan every {POLL_INTERVAL}s) — "
+            "no inotify instance and no inotify watch are used")
         return Poller(drop_dir, POLL_INTERVAL)
 
     try:
@@ -335,7 +336,9 @@ def main():
         os.makedirs(d, exist_ok=True)
 
     watcher = open_watcher(DROP_DIR)
-    log(f"watching {DROP_DIR} (moved_to, close_write); logs -> {LOG_DIR}")
+    how = "moved_to, close_write" if isinstance(watcher, Inotify) else \
+        f"rescan every {POLL_INTERVAL}s"
+    log(f"watching {DROP_DIR} ({how}); logs -> {LOG_DIR}")
     log(f"status -> {STATUS_DIR}/<name>.status ; work free {free_mb(WORK_DIR)} MB")
     log(f"submit by renaming '.name.sh' -> 'name.sh', or by writing directly")
 
