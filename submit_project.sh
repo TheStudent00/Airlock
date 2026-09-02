@@ -23,6 +23,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+source "$(dirname "$0")/instance.sh"
+airlock_parse_instance "$@"
+set -- "${AIRLOCK_ARGV[@]}"
+airlock_instance_load "$(cd "$(dirname "$0")" && pwd)"
+
 ALSO=()
 ENVS=()
 while :; do
@@ -45,7 +50,7 @@ done
 SRC="${1:?usage: ./submit_project.sh [--also DIR]... <host-dir> <command...>}"; shift
 [ $# -gt 0 ] || { echo "give a command to run in the project" >&2; exit 1; }
 [ -d "$SRC" ] || { echo "not a directory: $SRC" >&2; exit 1; }
-podman container exists sandbox-runner || { echo "sandbox-runner not running; ./up.sh first" >&2; exit 1; }
+podman container exists "$AL_RUNNER" || { echo "$AL_RUNNER not running; ./up.sh --instance $AL_INSTANCE first" >&2; exit 1; }
 
 SRC="${SRC%/}"
 NAME="$(basename "$SRC")"
@@ -53,15 +58,15 @@ NAME="$(basename "$SRC")"
 copy_in() {
     local src="$1" name
     name="$(basename "$src")"
-    echo "copying $src -> sandbox-runner:/work/$name"
-    podman exec sandbox-runner rm -rf "/work/$name"
-    podman cp "$src" "sandbox-runner:/work/$name"
-    echo "  copied ($(podman exec sandbox-runner du -sh "/work/$name" | cut -f1))"
+    echo "copying $src -> $AL_RUNNER:/work/$name"
+    podman exec "$AL_RUNNER" rm -rf "/work/$name"
+    podman cp "$src" "$AL_RUNNER:/work/$name"
+    echo "  copied ($(podman exec "$AL_RUNNER" du -sh "/work/$name" | cut -f1))"
 }
 
 for d in ${ALSO+"${ALSO[@]}"}; do copy_in "$d"; done
 copy_in "$SRC"
-size=$(podman exec sandbox-runner du -sh "/work/$NAME" | cut -f1)
+size=$(podman exec "$AL_RUNNER" du -sh "/work/$NAME" | cut -f1)
 
 # Build a wrapper script. printf %q quotes each argument so a command with
 # spaces or globs survives the trip intact.
@@ -98,9 +103,9 @@ mkdir -p DevComms
 echo -n "running"
 logname=""
 for _ in $(seq 1 720); do   # up to 1 hour, matching the daemon's timeout
-    logname=$(podman exec sandbox-runner sh -c \
+    logname=$(podman exec "$AL_RUNNER" sh -c \
         "ls -1 /logs 2>/dev/null | grep -F -- '$WNAME' | tail -1" || true)
-    if [ -n "$logname" ] && podman exec sandbox-runner \
+    if [ -n "$logname" ] && podman exec "$AL_RUNNER" \
             grep -qE '^# (exit|KILLED)' "/logs/$logname" 2>/dev/null; then
         break
     fi
@@ -115,10 +120,10 @@ if [ -n "$logname" ]; then
         echo "# project: $SRC  ($size copied to /work/$NAME)"
         echo "# command: $*"
         echo
-        podman exec sandbox-runner cat "/logs/$logname"
+        podman exec "$AL_RUNNER" cat "/logs/$logname"
         echo
         echo "## proxy refusals during/around this run"
-        podman logs sandbox-proxy 2>&1 | grep -E 'DENIED' | tail -20 \
+        podman logs "$AL_PROXY" 2>&1 | grep -E 'DENIED' | tail -20 \
             || echo "  none"
     } > "$SAVE" 2>&1
     echo "saved -> $SAVE"
