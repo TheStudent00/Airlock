@@ -147,11 +147,18 @@ airlock_instance_load() {
     # The default instance keeps `<root>/agent`, unchanged. Any other
     # instance gets its own tree so two instances never share a drop
     # folder — one derivation rule, not a per-name special case.
+    #
+    # A non-default instance's tree lives OUTSIDE the checkout, at
+    # $HOME/AirlockRuns/<name>/agent (ruled 2026-09-02). A drop/status/logs/
+    # out tree is a RUN RECORD, not a tool file: keeping it out of the
+    # checkout means no ignore rule is load-bearing, and a commit daemon
+    # walking the checkout never sees a run's products at all. `up.sh`
+    # creates it. The `agent_dir` key overrides this for any instance.
     local default_agent
     if [ "$AL_INSTANCE" = "sandbox" ]; then
         default_agent="$AL_ROOT/agent"
     else
-        default_agent="$AL_ROOT/instances/$AL_INSTANCE/agent"
+        default_agent="$HOME/AirlockRuns/$AL_INSTANCE/agent"
     fi
     AL_AGENT_DIR="$(_airlock_pick "$(_airlock_conf_get "$AL_CONF" agent_dir)" "$default_agent")"
     AL_AGENT_DIR="$(_airlock_abs "$AL_AGENT_DIR" "$AL_ROOT")"
@@ -207,20 +214,13 @@ airlock_instance_load() {
     # poll exists for a machine that has run out of inotify INSTANCES, which
     # is a per-user kernel limit (/proc/sys/fs/inotify/max_user_instances)
     # and is nothing to do with disk space, despite the ENOSPC it reports.
-    # `daemon_file` runs the daemon from a file on the host instead of the
-    # copy baked into the image, by binding it read-only over
-    # /opt/daemon/watcher.py. It is UNSET by default, so the image's own
-    # daemon is what runs and no instance's container spec changes.
     #
-    # It exists because the daemon is part of the image: a change to
-    # daemon/watcher.py otherwise needs a full image rebuild before any
-    # instance can use it. Set `daemon_file = daemon/watcher.py` to run the
-    # repo's copy now, and drop the key again after the next build.sh.
-    AL_DAEMON_FILE="$(_airlock_conf_get "$AL_CONF" daemon_file)"
-    if [ -n "$AL_DAEMON_FILE" ]; then
-        AL_DAEMON_FILE="$(_airlock_abs "$AL_DAEMON_FILE" "$AL_ROOT")"
-    fi
-
+    # There was a `daemon_file` key here until 2026-09-02: it bound a host
+    # file read-only over the image's /opt/daemon/watcher.py, so a daemon
+    # change could reach a running instance before a rebuild. It was
+    # documented as a bridge to be dropped after the next build.sh; that
+    # build has happened and the key is gone. A daemon change is a
+    # Containerfile-level change and reaches instances through build.sh.
     AL_WATCH="$(_airlock_pick "$(_airlock_conf_get "$AL_CONF" watch)" "inotify")"
     case "$AL_WATCH" in
         poll|polling) AL_WATCH="poll" ;;
