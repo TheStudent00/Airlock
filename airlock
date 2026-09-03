@@ -193,6 +193,21 @@ class Finding:
         return [self.severity, self.subject, self.detail, self.remedy or "-"]
 
 
+def tilde(path):
+    """A path with the home directory written `~`.
+
+    Airlock prints paths into reports and logs that get published, and an
+    absolute home path names the account that produced them. `~` says the
+    same thing about the location and nothing about the machine.
+    """
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    if path.startswith(home + os.sep):
+        return "~" + path[len(home):]
+    return path
+
+
 def runs_home():
     """Where a non-default instance's run tree lives by default.
 
@@ -674,7 +689,7 @@ class Doctor:
         instances/<name>.conf adds another. This is the check that answers
         "what else is running beside the one I asked about", which is the
         question a second sandbox makes possible to get wrong.
-        """
+
         TWO PLACES ARE LISTED, because an instance leaves two traces and
         either can exist without the other. `instances/<name>.conf` is its
         SETTINGS, inside the checkout. `~/AirlockRuns/<name>` is its RUN
