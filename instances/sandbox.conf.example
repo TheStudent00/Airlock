@@ -28,8 +28,16 @@ allowlist_file    = proxy/allowlist.txt
 
 # ---- what this instance can see -----------------------------------------
 mounts_file     = mounts.conf
-# agent_dir     = <root>/agent for the `sandbox` instance,
-#                 <root>/instances/<name>/agent for any other
+
+# ---- where this instance's runs are recorded ----------------------------
+# agent_dir is the drop/status/logs/out tree. Left unset it derives:
+#     <root>/agent                 for the `sandbox` instance
+#     ~/AirlockRuns/<name>/agent   for every other instance
+# A run tree is a run RECORD, not a tool file, so a non-default instance's
+# lives outside the checkout: nothing about a run sits beside source, and no
+# ignore rule is load-bearing. up.sh creates it on the first start. Set this
+# key to put it anywhere else; a relative value is taken from <root>.
+# agent_dir     = ~/AirlockRuns/<name>/agent
 
 # ---- the images ----------------------------------------------------------
 # An image is a build artifact, not instance state: leave these alone and a
@@ -46,3 +54,8 @@ lane_nice       = 15
 script_timeout  = 3600
 watch           = inotify   # `poll` if this machine has run out of inotify
                             # INSTANCES (/proc/sys/fs/inotify/max_user_instances)
+
+# There was a `daemon_file` key here until 2026-09-02, which bound a host
+# copy of the daemon over the image's own. It was a bridge until the next
+# build.sh; that build has happened and the key no longer exists. A daemon
+# change reaches an instance through build.sh.
