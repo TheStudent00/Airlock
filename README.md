@@ -141,7 +141,7 @@ it to exist.
 | command | what it does |
 |---|---|
 | `airlock up [...]` | start the sandbox. Delegates to `up.sh` |
-| `airlock down [--networks]` | stop and remove the containers. Delegates to `down.sh` |
+| `airlock down [--networks] [--force]` | stop and remove the containers. Delegates to `down.sh`, and so inherits its refusal while a lane is running |
 | `airlock submit <lane.sh> (--batch <label> [--weight N] \| --no-batch)` | validate the lane, decide its batch, then drop it hidden-then-renamed into `agent/drop/` |
 | `airlock status [<lane.sh>]` | compact view of one lane, or of the queue and the recent runs |
 | `airlock watch [--interval N]` | the same view, refreshed (default every 2s) |
@@ -219,7 +219,7 @@ anywhere once you use a full path.
 |---|---|
 | `bash <airlock>/build.sh` | builds both container images — **the only phase with open network access** |
 | `bash <airlock>/up.sh` | creates the two networks and starts the proxy and runner |
-| `bash <airlock>/down.sh [--networks]` | stops and removes the containers |
+| `bash <airlock>/down.sh [--networks] [--force]` | stops and removes the containers. **Refuses while a lane of that instance is running**, naming the lane; `--force` overrides |
 | `bash <airlock>/selftest.sh` | one repo-hygiene check plus six checks that prove the sandbox behaves as designed: nothing publishable names a person or machine, daemon alive, a submitted lane actually runs, half-written files are not executed, an allowed host is reachable, an undeclared host is refused, and there is no second route out |
 | `bash <airlock>/submit.sh <lane.sh> [--follow]` | hands one lane to the running sandbox with `podman cp` |
 | `bash <airlock>/submit_project.sh [--also DIR] [--env K=V] <host-dir> <command...>` | copies a whole directory into `/work` and runs a command against the **copy** |
@@ -363,7 +363,7 @@ what an instance replaces.
 | internal network | `<instance>-internal` |
 | egress network | `<instance>-egress` |
 | systemd units | `<instance>-runner.service`, and so on |
-| agent lane | `agent/` for `sandbox`; `instances/<name>/agent/` for any other |
+| agent lane | `agent/` for `sandbox`; `~/AirlockRuns/<name>/agent/` for any other |
 
 The derivation lives in **one file, `instance.sh`**, and nothing else spells
 a container name. Every script sources it; the `airlock` CLI asks it rather
@@ -394,6 +394,41 @@ persist_volume  = sandbox-persist
 persist_mode    = ro
 ```
 
+### An instance's run tree lives outside the checkout
+
+`agent/drop`, `agent/status`, `agent/logs` and `agent/out` are a **run
+record**, not a tool file. The default instance keeps its tree at
+`<airlock>/agent`, where it has always been. **Every other instance's tree
+defaults to `~/AirlockRuns/<name>/agent`**, outside the checkout entirely,
+and `up.sh` creates it on the first start. Nothing about a run then sits
+beside source, and no ignore rule is load-bearing for keeping products out
+of version control. The `agent_dir` key in `instances/<name>.conf` overrides
+this for any instance, including the default one.
+
+`airlock doctor` lists both places — `instances/*.conf` for an instance's
+settings and `~/AirlockRuns/*` for its run tree — because either can exist
+without the other: an instance needs no conf file at all, since every key
+has a default, and such an instance leaves its only trace under
+`~/AirlockRuns`.
+
+### One instance per task, and why a jam stays local
+
+**Execution inside one instance is serial, deliberately.** The daemon runs
+one lane to completion before starting the next; concurrent heavy runs are
+what exhaust the scratch tmpfs, and there is no `workers` key to change
+that. The consequence is that a long lane holds up every lane behind it —
+in **that instance**, and only there.
+
+So the unit of separation is the instance: **one task, one instance.** Two
+tasks that share an instance queue behind each other and, worse, can stop
+each other — on 2026-09-02 one agent took a shared instance down at the end
+of its own work while a second agent's lane was mid-run, and the second
+agent saw no error, only a run that had stopped. `down.sh` now refuses in
+exactly that situation, naming the running lane, and `--force` is the
+deliberate override. A slow lane — a trickle — jams its own instance's
+queue and nothing else on the machine: another instance has its own runner,
+its own drop folder and its own caps, and never waits behind it.
+
 ### The image is shared, so a second instance never forces a rebuild
 
 `runner_image` defaults to `sandbox-runner:latest` for **every** instance,
@@ -421,11 +456,10 @@ a guess.
 | `LANE_NICE` | `15` | the `lane_nice` key; read by `daemon/watcher.py` and applied via `os.nice()` before each lane execs | set it per instance. A lane still competes for CPU under the cpu cap, just gently |
 | `SCRIPT_TIMEOUT` | `3600` seconds | the `script_timeout` key; read by `daemon/watcher.py` | set it per instance. On expiry the OS stops the run; the daemon records its own token in the status file and `airlock status` renders the outcome as **ABORT** |
 | `AIRLOCK_INSTANCE` | `sandbox` — the default instance | env var read by `instance.sh` and by `airlock` | `--instance <name>` on any script or on `airlock` overrides it. Every container, network, volume and unit name is derived from it in `instance.sh`, and nowhere else |
-| `instances/<name>.conf` | absent — every key falls back to its built-in default | `<airlock>/instances/`, gitignored, per-machine | `cp instances/sandbox.conf.example instances/<name>.conf` and edit. Keys: `cpus`, `memory`, `pids_limit`, `tmp_size`, `work_size`, `proxy`, `proxy_memory`, `proxy_cpus`, `proxy_pids_limit`, `allowlist_file`, `mounts_file`, `agent_dir`, `runner_image`, `proxy_image`, `persist_volume`, `persist_mode`, `lane_nice`, `script_timeout`, `watch`, `daemon_file` |
+| `instances/<name>.conf` | absent — every key falls back to its built-in default | `<airlock>/instances/`, gitignored, per-machine | `cp instances/sandbox.conf.example instances/<name>.conf` and edit. Keys: `cpus`, `memory`, `pids_limit`, `tmp_size`, `work_size`, `proxy`, `proxy_memory`, `proxy_cpus`, `proxy_pids_limit`, `allowlist_file`, `mounts_file`, `agent_dir`, `runner_image`, `proxy_image`, `persist_volume`, `persist_mode`, `lane_nice`, `script_timeout`, `watch` |
 | `proxy` (per instance) | `yes` | the `proxy` key in `instances/<name>.conf` | `proxy = no` starts no proxy and no egress network: the instance has **no route out at all**. `selftest.sh` reports checks 4–6 as SKIP for such an instance instead of a verdict it cannot reach |
 | `persist_volume` / `persist_mode` | `<instance>-persist`, `rw` | same file | point a second instance at another instance's volume with `persist_mode = ro` to share a toolchain it must not be able to alter |
 | `AIRLOCK_WATCH` | `inotify` | the `watch` key in `instances/<name>.conf`; read by `daemon/watcher.py` | `poll` rescans `/drop` every `AIRLOCK_POLL_INTERVAL` seconds (default 2) and uses **no inotify resource at all**. `auto` tries inotify and falls back to polling, loudly, only on the ENOSPC that means the kernel has none left. See [When inotify runs out](#when-inotify-runs-out) |
-| `daemon_file` | unset — the daemon baked into the image runs | the `daemon_file` key in `instances/<name>.conf` | names a host file to bind read-only over `/opt/daemon/watcher.py`. It exists because the daemon is part of the image: a change to `daemon/watcher.py` otherwise needs a full rebuild before any instance can use it. Drop the key after the next `build.sh` |
 | `AIRLOCK_ROOT` | unset — `airlock` uses its own directory | env var read by `airlock` | export it to point a project at a particular Airlock tree. `--root` overrides it; `SANDBOX_DESIGN_ROOT` is read after it |
 | `mounts.conf` | none — no host directory is exposed | `<airlock>/mounts.conf`, gitignored, per-machine; an instance may name a different file with `mounts_file` | `cp mounts.conf.example mounts.conf` and edit. One `<host>:<container>[:mode]` per line, default read-only. **This file is the only place a real path is ever named**, and it is never committed |
 | egress allowlist | none until you copy the example — the proxy default-denies | `<airlock>/proxy/allowlist.txt`, gitignored, per-machine; every instance shares it unless one names its own with `allowlist_file` | `cp proxy/allowlist.txt.example proxy/allowlist.txt`, then `bash ./allow.sh add <hostname>...`, which rewrites the file and reloads squid without restarting the container |
