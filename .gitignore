@@ -28,7 +28,10 @@ mounts.conf
 # Which INSTANCES this install runs, and each one's caps. Same pattern as
 # mounts.conf: instances/sandbox.conf.example is committed and is the
 # documentation, the real .conf files never are. An instance's own agent
-# tree lives under instances/<name>/ and is a run record, not a tool file.
+# tree is a run record, not a tool file, and since 2026-09-02 it lives
+# OUTSIDE the checkout at ~/AirlockRuns/<name>/agent. The instances/*/ rule
+# below stays for trees created under the older default, which were left in
+# place rather than moved.
 instances/*.conf
 !instances/*.conf.example
 instances/*/
