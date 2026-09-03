@@ -193,6 +193,18 @@ class Finding:
         return [self.severity, self.subject, self.detail, self.remedy or "-"]
 
 
+def runs_home():
+    """Where a non-default instance's run tree lives by default.
+
+    Ruled 2026-09-02: OUTSIDE the checkout, at ~/AirlockRuns/<name>/agent.
+    A drop/status/logs/out tree is a run record rather than a tool file, so
+    it does not sit beside source behind an ignore rule. `instance.sh`
+    derives the same path; this is the CLI's fallback for when it cannot
+    ask that file, and what `doctor` lists.
+    """
+    return os.path.join(os.path.expanduser("~"), "AirlockRuns")
+
+
 class Paths:
     """Every path the CLI reads, writes or names, resolved from one root."""
 
@@ -203,7 +215,7 @@ class Paths:
         agent = self.settings.get(
             "AL_AGENT_DIR",
             os.path.join(self.root, "agent") if instance == DEFAULT_INSTANCE
-            else os.path.join(self.root, "instances", instance, "agent"))
+            else os.path.join(runs_home(), instance, "agent"))
         self.agent = agent
         self.drop = os.path.join(agent, "drop")
         self.done = os.path.join(self.drop, ".done")
@@ -663,29 +675,54 @@ class Doctor:
         "what else is running beside the one I asked about", which is the
         question a second sandbox makes possible to get wrong.
         """
-        known = [DEFAULT_INSTANCE]
+        TWO PLACES ARE LISTED, because an instance leaves two traces and
+        either can exist without the other. `instances/<name>.conf` is its
+        SETTINGS, inside the checkout. `~/AirlockRuns/<name>` is its RUN
+        TREE, outside the checkout (ruled 2026-09-02). An instance started
+        with no conf file at all — every key has a default — appears only
+        under AirlockRuns, and listing only `instances/` would miss it.
+        """
+        known = []
+        origin = {}
+
+        def note(name, where):
+            if name not in known:
+                known.append(name)
+                origin[name] = []
+            if where not in origin[name]:
+                origin[name].append(where)
+
+        note(DEFAULT_INSTANCE, "built-in")
+
         conf_dir = os.path.join(paths.root, "instances")
         if os.path.isdir(conf_dir):
             for entry in sorted(os.listdir(conf_dir)):
                 if not entry.endswith(".conf") or entry.endswith(".conf.example"):
                     continue
-                name = entry[:-len(".conf")]
-                if name not in known:
-                    known.append(name)
+                note(entry[:-len(".conf")], "conf")
+
+        runs = runs_home()
+        if os.path.isdir(runs):
+            for entry in sorted(os.listdir(runs)):
+                if os.path.isdir(os.path.join(runs, entry)):
+                    note(entry, "runs")
 
         rows = []
-        for name in known:
+        for name in sorted(known):
             runner = "%s-runner" % name
             state = podman_inspect(runner, "{{.State.Status}}") or "absent"
             mark = " <- this command" if name == paths.instance else ""
-            rows.append("%s (%s: %s)%s" % (name, runner, state, mark))
+            rows.append("%s (%s: %s; %s)%s"
+                        % (name, runner, state, "+".join(origin[name]), mark))
 
         return [Finding(
             NOTE, "instances",
-            "%d known: %s" % (len(known), "; ".join(rows)),
+            "%d known, from instances/*.conf and %s/*: %s"
+            % (len(known), tilde(runs), "; ".join(rows)),
             "airlock --instance <name> <command>, or bash %s --instance "
             "<name>; a new instance is a new instances/<name>.conf (see "
-            "instances/sandbox.conf.example)" % paths.script("up.sh"))]
+            "instances/sandbox.conf.example), and its run tree is made "
+            "under %s on the first up" % (paths.script("up.sh"), tilde(runs)))]
 
     @staticmethod
     def check_container(paths):
