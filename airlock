@@ -1220,7 +1220,12 @@ def up(paths, args):
 
 
 def down(paths, args):
-    """airlock down - delegate to down.sh."""
+    """airlock down - delegate to down.sh.
+
+    down.sh refuses while a lane of this instance is recorded running, and
+    takes --force. Both reach it through this delegation unchanged: the
+    refusal is written once, in the shell script.
+    """
     return delegate(paths, "down.sh", args)
 
 
@@ -1558,8 +1563,10 @@ def usage():
         [["up [...]",
           "start the sandbox - delegates to up.sh, so --cpus/--memory/tmpfs "
           "caps have one spelling"],
-         ["down [--networks]",
-          "stop and remove the containers - delegates to down.sh"],
+         ["down [--networks] [--force]",
+          "stop and remove the containers - delegates to down.sh, which "
+          "refuses while a lane of that instance is running (--force "
+          "overrides)"],
          ["submit <lane.sh> ...",
           "validate a lane, decide its batch, then drop it into agent/drop"],
          ["status [<lane.sh>]",
