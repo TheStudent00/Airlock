@@ -297,10 +297,6 @@ airlock_other_busy_instances() {
 
             local drop="$AL_AGENT_DIR/drop"
             local status="$AL_AGENT_DIR/status"
-            local queued=0
-            if compgen -G "$drop"/*.sh > /dev/null 2>&1; then
-                queued=$(ls -1 "$drop"/*.sh 2>/dev/null | wc -l | tr -d ' ')
-            fi
 
             local -a running=()
             if compgen -G "$status"/*.status > /dev/null 2>&1; then
@@ -309,6 +305,22 @@ airlock_other_busy_instances() {
                     grep -q '^state=running' "$s" 2>/dev/null || continue
                     script=$(sed -n 's/^script=//p' "$s")
                     running+=("${script:-$(basename "$s" .status)}")
+                done
+            fi
+
+            # A running lane's script stays in /drop for its whole run (the
+            # daemon only archives it into .done on completion), so it is
+            # excluded here rather than double-counted as queued too.
+            local queued=0
+            if compgen -G "$drop"/*.sh > /dev/null 2>&1; then
+                local f base is_running
+                for f in "$drop"/*.sh; do
+                    base=$(basename "$f")
+                    is_running=0
+                    for script in "${running[@]}"; do
+                        [ "$script" = "$base" ] && is_running=1 && break
+                    done
+                    [ "$is_running" = 0 ] && queued=$((queued + 1))
                 done
             fi
 
