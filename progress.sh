@@ -27,6 +27,25 @@ LOGS="$AL_AGENT_DIR/logs"
 STATUS="$AL_AGENT_DIR/status"
 BATCH_JSON="$AL_AGENT_DIR/batch.json"
 
+# ---- other instances ------------------------------------------------------
+#
+# Dee, 2026-09-03: "what is running and why cant i see it in Airlock
+# status?" By the round-11 ruling every task runs in its own instance, so
+# a busy OTHER instance is invisible from the default view unless this is
+# printed. See airlock_other_busy_instances in instance.sh — it reuses
+# airlock_instance_list for discovery and airlock_instance_load for each
+# instance's agent tree, so this never re-derives either.
+print_other_instances() {
+  local busy
+  busy=$(airlock_other_busy_instances "$AL_ROOT" "$AL_INSTANCE")
+  if [ -n "$busy" ]; then
+    echo "== other instances busy =="
+    echo "$busy" | sed 's/^/  /'
+    echo "  (this view is instance '$AL_INSTANCE' — bash $0 --instance <name> [-w])"
+    echo
+  fi
+}
+
 # ---- batch summary --------------------------------------------------------
 #
 # agent/batch.json (written by batch.sh, BEFORE lanes are dropped) records
@@ -193,6 +212,7 @@ print_batch_summary() {
 snapshot() {
   echo "== instance $AL_INSTANCE  (runner $AL_RUNNER, agent $AL_AGENT_DIR) =="
   echo
+  print_other_instances
   print_batch_summary
 
   echo "== queued (waiting in $DROP) =="

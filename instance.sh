@@ -239,20 +239,90 @@ airlock_instance_load() {
 }
 
 # airlock_instance_list -> one instance name per line.
-#   Every `instances/*.conf` on disk, plus `sandbox`, which always exists
-#   because its every setting has a built-in default.
+#   Every instance this install knows about, from the SAME two-source scan
+#   `Doctor.check_instances` in the `airlock` CLI uses, so the shell side
+#   and the python side can never disagree about what exists:
+#     - `sandbox`, which always exists (every setting has a built-in default)
+#     - `instances/<name>.conf` — an instance's SETTINGS, inside the checkout
+#     - `~/AirlockRuns/<name>` — an instance's RUN TREE, outside the checkout
+#       (ruled 2026-09-02); an instance started with no conf file at all
+#       appears only here.
+#   This is the one place the shell side lists instances; a caller wanting
+#   an instance's run tree still goes through airlock_instance_load, never
+#   by re-deriving the path here.
 airlock_instance_list() {
     local root="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
     {
         echo "sandbox"
-        local f
+        local f b
         for f in "$root"/instances/*.conf; do
             [ -e "$f" ] || continue
-            local b
             b="$(basename "$f")"
             echo "${b%.conf}"
         done
+        local runs="$HOME/AirlockRuns"
+        if [ -d "$runs" ]; then
+            for f in "$runs"/*/; do
+                [ -d "$f" ] || continue
+                echo "$(basename "$f")"
+            done
+        fi
     } | sort -u
+}
+
+# airlock_other_busy_instances ROOT CURRENT_INSTANCE -> zero or more lines,
+#   one per OTHER instance that has a lane queued or running right now.
+#   Format per line: "<name>: running <script1,script2> | queued N".
+#
+#   THE PROBLEM MEASURED (Dee, 2026-09-03): "what is running and why cant i
+#   see it in Airlock status?" — progress.sh only ever looked at the CURRENT
+#   instance's agent tree, so a lane running in a non-default instance (by
+#   the round-11 ruling, every task's own instance) was invisible from the
+#   command most people type with no --instance flag at all.
+#
+#   Reuses airlock_instance_list for discovery (never re-derives it) and
+#   airlock_instance_load for each other instance's agent tree (never
+#   re-derives a path). An instance whose tree does not exist yet, or is
+#   unreadable, degrades to being skipped — this is a header, not a check,
+#   and must never turn a progress snapshot into an error.
+airlock_other_busy_instances() {
+    local root="$1"
+    local current="$2"
+    local name
+    for name in $(airlock_instance_list "$root"); do
+        [ "$name" = "$current" ] && continue
+        (
+            AIRLOCK_INSTANCE="$name"
+            airlock_instance_load "$root" > /dev/null 2>&1 || exit 0
+
+            local drop="$AL_AGENT_DIR/drop"
+            local status="$AL_AGENT_DIR/status"
+            local queued=0
+            if compgen -G "$drop"/*.sh > /dev/null 2>&1; then
+                queued=$(ls -1 "$drop"/*.sh 2>/dev/null | wc -l | tr -d ' ')
+            fi
+
+            local -a running=()
+            if compgen -G "$status"/*.status > /dev/null 2>&1; then
+                local s script
+                for s in "$status"/*.status; do
+                    grep -q '^state=running' "$s" 2>/dev/null || continue
+                    script=$(sed -n 's/^script=//p' "$s")
+                    running+=("${script:-$(basename "$s" .status)}")
+                done
+            fi
+
+            if [ "${#running[@]}" -gt 0 ] || [ "$queued" -gt 0 ]; then
+                local bits=""
+                [ "${#running[@]}" -gt 0 ] && bits="running: $(IFS=,; echo "${running[*]}")"
+                if [ "$queued" -gt 0 ]; then
+                    [ -n "$bits" ] && bits="$bits; "
+                    bits="${bits}${queued} queued"
+                fi
+                echo "$name ($bits)"
+            fi
+        )
+    done
 }
 
 # airlock_instance_banner -> the one line every script prints so a reader
