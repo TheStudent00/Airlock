@@ -65,6 +65,13 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
 RUN python3.13 -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip setuptools wheel \
     && chmod -R a+rwX /opt/venv
+
+# ---- analysis packages the research lines import -------------------------
+# Kept in requirements-analysis.txt so the pins are readable and one file to
+# edit. See install_pipeline_toolchain.sh for why they are in the image.
+COPY requirements-analysis.txt /opt/requirements-analysis.txt
+RUN /opt/venv/bin/pip install --no-cache-dir -r /opt/requirements-analysis.txt \
+    && chmod -R a+rwX /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV VIRTUAL_ENV=/opt/venv
 
