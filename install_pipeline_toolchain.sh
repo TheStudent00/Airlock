@@ -35,18 +35,18 @@ MARKER='requirements-analysis.txt'
 # Versions are the ones the line's artifacts were built with, as recorded in
 # DevComms logs 159-190 (pyvex 9.3.4, z3 5.1.0, capstone 5.0.7, tree-sitter
 # 0.25.2, tree-sitter-cpp 0.23.4). archinfo and pyelftools were not pinned in
-# a log, so they float; pin them here once a lane has reported its versions.
+# a log; they are pinned here to the versions the built image reported.
 cat > "$REQ" <<'EOF'
 pyvex==9.3.4
-archinfo
+archinfo==9.3.4
 capstone==5.0.7
-pyelftools
+pyelftools==0.33
 z3-solver==5.1.0
 tree-sitter==0.25.2
-tree-sitter-c
+tree-sitter-c==0.24.2
 tree-sitter-cpp==0.23.4
-tree-sitter-go
-tree-sitter-rust
+tree-sitter-go==0.25.0
+tree-sitter-rust==0.24.2
 EOF
 echo "[1/4] wrote $REQ"
 
