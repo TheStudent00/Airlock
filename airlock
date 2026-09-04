@@ -293,20 +293,24 @@ def other_busy_instances_line(paths):
         except Exception:
             continue
 
-        queued = 0
-        if os.path.isdir(other.drop):
-            try:
-                queued = len([e for e in os.listdir(other.drop)
-                              if e.endswith(".sh") and not e.startswith(".")])
-            except OSError:
-                pass
-
         running = []
         try:
             running = [s.name for s in LaneStatus.read_all(other)
                        if s.state == "running"]
         except Exception:
             pass
+
+        # A running lane's script stays in /drop for its whole run (the
+        # daemon only archives it into .done on completion), so it would
+        # otherwise be double-counted as both running and queued.
+        queued = 0
+        if os.path.isdir(other.drop):
+            try:
+                queued = len([e for e in os.listdir(other.drop)
+                              if e.endswith(".sh") and not e.startswith(".")
+                              and e not in running])
+            except OSError:
+                pass
 
         if not queued and not running:
             continue
