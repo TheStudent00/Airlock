@@ -220,6 +220,111 @@ def runs_home():
     return os.path.join(os.path.expanduser("~"), "AirlockRuns")
 
 
+def known_instances(paths):
+    """Every instance name this install knows about, each with its origin.
+
+    TWO PLACES ARE THE DISCOVERY SURFACE, because an instance leaves two
+    traces and either can exist without the other: `instances/<name>.conf`
+    is an instance's SETTINGS, inside the checkout; `~/AirlockRuns/<name>`
+    is its RUN TREE, outside the checkout (ruled 2026-09-02). `sandbox`
+    always exists because every one of its settings has a built-in default.
+
+    Returns {name: [origin, ...]}, e.g. {"trickle": ["conf", "runs"]}.
+
+    THE ONE PLACE this scan happens: `Doctor.check_instances` and
+    `other_busy_instances_line` (used by `status`/`watch`, and read by
+    progress.sh's own equivalent scan in instance.sh) both call this
+    rather than re-listing `instances/*.conf` and `~/AirlockRuns/*`
+    themselves, so doctor and the cross-instance status header can never
+    disagree about what instances exist.
+    """
+    origin = {}
+
+    def note(name, where):
+        origin.setdefault(name, [])
+        if where not in origin[name]:
+            origin[name].append(where)
+
+    note(DEFAULT_INSTANCE, "built-in")
+
+    conf_dir = os.path.join(paths.root, "instances")
+    if os.path.isdir(conf_dir):
+        for entry in sorted(os.listdir(conf_dir)):
+            if not entry.endswith(".conf") or entry.endswith(".conf.example"):
+                continue
+            note(entry[:-len(".conf")], "conf")
+
+    runs = runs_home()
+    if os.path.isdir(runs):
+        for entry in sorted(os.listdir(runs)):
+            if os.path.isdir(os.path.join(runs, entry)):
+                note(entry, "runs")
+
+    return origin
+
+
+def other_busy_instances_line(paths):
+    """One line naming any OTHER instance with a queued or running lane.
+
+    THE PROBLEM MEASURED (Dee, 2026-09-03): "what is running and why cant
+    i see it in Airlock status?" — `airlock status` (and progress.sh) only
+    ever looked at the CURRENT instance's agent tree, so a lane running in
+    a non-default instance was invisible from the command most people type
+    with no `--instance` flag at all. By the round-11 ruling every task
+    runs in its own instance, so this is not a rare case.
+
+    DISCOVERY reuses `known_instances(paths)` — the same two-source scan
+    `Doctor.check_instances` uses — so this can never see a different set
+    of instances than `airlock doctor` reports.
+
+    DEGRADES QUIETLY: an instance whose settings cannot be read, whose
+    agent tree does not exist, or whose status directory is unreadable is
+    just skipped — this is a header, not a check, and it must never turn
+    a status view into an error.
+
+    Returns None when no other instance has anything queued or running.
+    """
+    busy = []
+    for name in sorted(known_instances(paths)):
+        if name == paths.instance:
+            continue
+        try:
+            other = Paths(paths.root, name)
+        except Exception:
+            continue
+
+        queued = 0
+        if os.path.isdir(other.drop):
+            try:
+                queued = len([e for e in os.listdir(other.drop)
+                              if e.endswith(".sh") and not e.startswith(".")])
+            except OSError:
+                pass
+
+        running = []
+        try:
+            running = [s.name for s in LaneStatus.read_all(other)
+                       if s.state == "running"]
+        except Exception:
+            pass
+
+        if not queued and not running:
+            continue
+        bits = []
+        if running:
+            bits.append("running: %s" % ", ".join(running))
+        if queued:
+            bits.append("%d queued" % queued)
+        busy.append("%s (%s)" % (name, "; ".join(bits)))
+
+    if not busy:
+        return None
+    return ("  other instances busy: %s   (this view is instance '%s' — "
+            "airlock --instance <name> status, or bash %s --instance "
+            "<name>)"
+            % ("; ".join(busy), paths.instance, tilde(paths.script("progress.sh"))))
+
+
 class Paths:
     """Every path the CLI reads, writes or names, resolved from one root."""
 
@@ -697,33 +802,12 @@ class Doctor:
         with no conf file at all — every key has a default — appears only
         under AirlockRuns, and listing only `instances/` would miss it.
         """
-        known = []
-        origin = {}
-
-        def note(name, where):
-            if name not in known:
-                known.append(name)
-                origin[name] = []
-            if where not in origin[name]:
-                origin[name].append(where)
-
-        note(DEFAULT_INSTANCE, "built-in")
-
-        conf_dir = os.path.join(paths.root, "instances")
-        if os.path.isdir(conf_dir):
-            for entry in sorted(os.listdir(conf_dir)):
-                if not entry.endswith(".conf") or entry.endswith(".conf.example"):
-                    continue
-                note(entry[:-len(".conf")], "conf")
-
+        origin = known_instances(paths)
+        known = sorted(origin)
         runs = runs_home()
-        if os.path.isdir(runs):
-            for entry in sorted(os.listdir(runs)):
-                if os.path.isdir(os.path.join(runs, entry)):
-                    note(entry, "runs")
 
         rows = []
-        for name in sorted(known):
+        for name in known:
             runner = "%s-runner" % name
             state = podman_inspect(runner, "{{.State.Status}}") or "absent"
             mark = " <- this command" if name == paths.instance else ""
@@ -1379,6 +1463,11 @@ def submit(paths, args):
 
 def _render_status(paths, name, limit):
     """The body of `status`, shared with `watch` so both render identically."""
+    other = other_busy_instances_line(paths)
+    if other:
+        print(other)
+        print()
+
     manifest = Batch.read(paths)
     print("batch summary")
     if manifest is not None:
