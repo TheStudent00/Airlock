@@ -29,7 +29,7 @@ BATCH_JSON="$AL_AGENT_DIR/batch.json"
 
 # ---- other instances ------------------------------------------------------
 #
-# Dee, 2026-09-03: "what is running and why cant i see it in Airlock
+# Measured 2026-09-03: "what is running and why cant i see it in Airlock
 # status?" By the round-11 ruling every task runs in its own instance, so
 # a busy OTHER instance is invisible from the default view unless this is
 # printed. See airlock_other_busy_instances in instance.sh — it reuses

@@ -274,7 +274,7 @@ airlock_instance_list() {
 #   one per OTHER instance that has a lane queued or running right now.
 #   Format per line: "<name>: running <script1,script2> | queued N".
 #
-#   THE PROBLEM MEASURED (Dee, 2026-09-03): "what is running and why cant i
+#   THE PROBLEM MEASURED, 2026-09-03: "what is running and why cant i
 #   see it in Airlock status?" — progress.sh only ever looked at the CURRENT
 #   instance's agent tree, so a lane running in a non-default instance (by
 #   the round-11 ruling, every task's own instance) was invisible from the

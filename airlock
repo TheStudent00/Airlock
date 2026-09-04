@@ -266,7 +266,7 @@ def known_instances(paths):
 def other_busy_instances_line(paths):
     """One line naming any OTHER instance with a queued or running lane.
 
-    THE PROBLEM MEASURED (Dee, 2026-09-03): "what is running and why cant
+    THE PROBLEM MEASURED, 2026-09-03: "what is running and why cant
     i see it in Airlock status?" — `airlock status` (and progress.sh) only
     ever looked at the CURRENT instance's agent tree, so a lane running in
     a non-default instance was invisible from the command most people type
