@@ -1,2 +1,67 @@
 # install_quadlet.sh — instance sandbox — 2026-09-05T01:40:53-04:00
   stopping any existing units for instance sandbox
+  removing this instance's containers and networks
+  agent lane bound from /home/lucas/Programming/Airlock/agent:
+    /home/lucas/Programming/Airlock/agent/drop:/drop
+    /home/lucas/Programming/Airlock/agent/out:/out
+    /home/lucas/Programming/Airlock/agent/logs:/logs
+    /home/lucas/Programming/Airlock/agent/status:/status
+  mounts from /home/lucas/Programming/Airlock/mounts.conf:
+    /home/lucas/Programming/PseudoCoup_v5:/projects/PseudoCoup_v5:ro
+    /home/lucas/Programming/PseudoCoup_v6:/projects/PseudoCoup_v6:ro
+    /home/lucas/Programming/PseudoCoupHQ:/projects/PseudoCoupHQ:rw
+    /home/lucas/Programming/Sources:/sources:ro
+    /home/lucas/Programming/PlanPlan:/projects/PlanPlan:ro
+    /home/lucas/Programming/PseudoCoupGraphs:/projects/PseudoCoupGraphs:rw
+  installed /home/lucas/.config/containers/systemd/sandbox-internal.network   (from quadlet/sandbox-internal.network)
+  installed /home/lucas/.config/containers/systemd/sandbox-egress.network   (from quadlet/sandbox-egress.network)
+  installed /home/lucas/.config/containers/systemd/sandbox-proxy.container   (from quadlet/sandbox-proxy.container)
+  installed /home/lucas/.config/containers/systemd/sandbox-runner.container   (from quadlet/sandbox-runner.container)
+  starting networks
+    sandbox-internal-network.service started
+    sandbox-egress-network.service started
+  networks known to podman now:
+    ourobrowser-internal
+    podman
+    sandbox-egress
+    sandbox-internal
+    t59-egress
+    t59-internal
+    t72-internal
+    t81-internal
+    t82-internal
+    t83-internal
+    t87-internal
+    t91-internal
+    t93-internal
+    trickle-internal
+    va-egress
+    va-internal
+  starting containers
+    sandbox-proxy.service started
+    sandbox-runner.service started
+
+=== unit status ===
+  ● sandbox-proxy.service - Sandbox allowlist proxy
+       Loaded: loaded (/home/lucas/.config/containers/systemd/sandbox-proxy.container; generated)
+       Active: active (running) since Sat 2026-09-05 01:41:04 EDT; 118ms ago
+       CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/sandbox-proxy.service
+                 └─3159362 /usr/bin/conmon --api-version 1 -c e551591c8d606610e86408f4c3921eb29357b696f3393941925f8ca1f435ac13 -u e551591c8d606610e86408f4c3921eb29357b696f3393941925f8ca1f435ac13 -r /usr/bin/crun -b /home/lucas/.local/share/containers/storage/overlay-containers/e551591c8d606610e86408f4c3921eb29357b696f3393941925f8ca1f435ac13/userdata -p /run/user/1000/containers/overlay-containers/e551591c8d606610e86408f4c3921eb29357b696f3393941925f8ca1f435ac13/userdata/pidfile -n sandbox-proxy --exit-dir /run/user/1000/libpod/tmp/exits --persist-dir /run/user/1000/libpod/tmp/persist/e551591c8d606610e86408f4c3921eb29357b696f3393941925f8ca1f435ac13 --full-attach -l journald --log-level warning --syslog --runtime-arg --log-format=json --runtime-arg --log --runtime-arg=/run/user/1000/containers/overlay-containers/e551591c8d606610e86408f4c3921eb29357b696f3393941925f8ca1f435ac13/userdata/oci-log --conmon-pidfile /run/user/1000/containers/overlay-containers/e551591c8d606610e86408f4c3921eb29357b696f3393941925f8ca1f435ac13/userdata/conmon.pid --exit-command /usr/bin/podman --exit-command-arg --root --exit-command-arg /home/lucas/.local/share/containers/storage --exit-command-arg --runroot --exit-command-arg /run/user/1000/containers --exit-command-arg --log-level --exit-command-arg warning --exit-command-arg --cgroup-manager --exit-command-arg systemd --exit-command-arg --tmpdir --exit-command-arg /run/user/1000/libpod/tmp --exit-command-arg --network-config-dir --exit-command-arg "" --exit-command-arg --network-backend --exit-command-arg netavark --exit-command-arg --volumepath --exit-command-arg /home/lucas/.local/share/containers/storage/volumes --exit-command-arg --db-backend --exit-command-arg sqlite --exit-command-arg --transient-store=false --exit-command-arg --hooks-dir --exit-command-arg /usr/share/containers/oci/hooks.d --exit-command-arg --runtime --exit-command-arg crun --exit-command-arg --storage-driver --exit-command-arg overlay --exit-command-arg --events-backend --exit-command-arg journald --exit-command-arg container --exit-command-arg cleanup --exit-command-arg --stopped-only --exit-command-arg --rm --exit-command-arg e551591c8d606610e86408f4c3921eb29357b696f3393941925f8ca1f435ac13
+  ● sandbox-runner.service - Sandbox script runner (hot-folder daemon)
+       Loaded: loaded (/home/lucas/.config/containers/systemd/sandbox-runner.container; generated)
+       Active: active (running) since Sat 2026-09-05 01:41:04 EDT; 7ms ago
+       CGroup: /user.slice/user-1000.slice/user@1000.service/app.slice/sandbox-runner.service
+                 ├─3159367 /usr/bin/podman run --name sandbox-runner --replace --rm --cgroups=split --pids-limit 2048 --memory 12g --tmpfs /tmp:rw,nosuid,nodev,size=2g --tmpfs /work:rw,nosuid,nodev,size=4g --network sandbox-internal --sdnotify=conmon -d --security-opt=no-new-privileges --cap-drop all -v /home/lucas/Programming/Airlock/agent/drop:/drop -v /home/lucas/Programming/Airlock/agent/out:/out -v /home/lucas/Programming/Airlock/agent/logs:/logs -v /home/lucas/Programming/Airlock/agent/status:/status -v /home/lucas/Programming/PseudoCoup_v5:/projects/PseudoCoup_v5:ro -v /home/lucas/Programming/PseudoCoup_v6:/projects/PseudoCoup_v6:ro -v /home/lucas/Programming/PseudoCoupHQ:/projects/PseudoCoupHQ:rw -v /home/lucas/Programming/Sources:/sources:ro -v /home/lucas/Programming/PlanPlan:/projects/PlanPlan:ro -v /home/lucas/Programming/PseudoCoupGraphs:/projects/PseudoCoupGraphs:rw -v sandbox-persist:/persist:rw --cpus=6 localhost/sandbox-runner:latest
+                 └─3159391 /usr/bin/conmon --api-version 1 -c b64c54cfaa2e930339aa6cb6dbc15579a569db2cccad5a79ff96278f2ab7b404 -u b64c54cfaa2e930339aa6cb6dbc15579a569db2cccad5a79ff96278f2ab7b404 -r /usr/bin/crun -b /home/lucas/.local/share/containers/storage/overlay-containers/b64c54cfaa2e930339aa6cb6dbc15579a569db2cccad5a79ff96278f2ab7b404/userdata -p /run/user/1000/containers/overlay-containers/b64c54cfaa2e930339aa6cb6dbc15579a569db2cccad5a79ff96278f2ab7b404/userdata/pidfile -n sandbox-runner --exit-dir /run/user/1000/libpod/tmp/exits --persist-dir /run/user/1000/libpod/tmp/persist/b64c54cfaa2e930339aa6cb6dbc15579a569db2cccad5a79ff96278f2ab7b404 --full-attach -l journald --log-level warning --syslog --runtime-arg --log-format=json --runtime-arg --log --runtime-arg=/run/user/1000/containers/overlay-containers/b64c54cfaa2e930339aa6cb6dbc15579a569db2cccad5a79ff96278f2ab7b404/userdata/oci-log --conmon-pidfile /run/user/1000/containers/overlay-containers/b64c54cfaa2e930339aa6cb6dbc15579a569db2cccad5a79ff96278f2ab7b404/userdata/conmon.pid --exit-command /usr/bin/podman --exit-command-arg --root --exit-command-arg /home/lucas/.local/share/containers/storage --exit-command-arg --runroot --exit-command-arg /run/user/1000/containers --exit-command-arg --log-level --exit-command-arg warning --exit-command-arg --cgroup-manager --exit-command-arg systemd --exit-command-arg --tmpdir --exit-command-arg /run/user/1000/libpod/tmp --exit-command-arg --network-config-dir --exit-command-arg "" --exit-command-arg --network-backend --exit-command-arg netavark --exit-command-arg --volumepath --exit-command-arg /home/lucas/.local/share/containers/storage/volumes --exit-command-arg --db-backend --exit-command-arg sqlite --exit-command-arg --transient-store=false --exit-command-arg --hooks-dir --exit-command-arg /usr/share/containers/oci/hooks.d --exit-command-arg --runtime --exit-command-arg crun --exit-command-arg --storage-driver --exit-command-arg overlay --exit-command-arg --events-backend --exit-command-arg journald --exit-command-arg container --exit-command-arg cleanup --exit-command-arg --stopped-only --exit-command-arg --rm --exit-command-arg b64c54cfaa2e930339aa6cb6dbc15579a569db2cccad5a79ff96278f2ab7b404
+
+  sandbox-proxy  Up Less than a second
+  sandbox-runner  Up Less than a second
+
+From here on:
+  systemctl --user restart sandbox-runner
+  systemctl --user status  sandbox-runner
+  journalctl --user -u sandbox-runner -f
+
+airlock, submit.sh, submit_project.sh, logs.sh, allow.sh, pull.sh
+all still work.
+Verify with:  ./selftest.sh --instance sandbox
