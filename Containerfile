@@ -18,7 +18,7 @@ ENV LANG=C.UTF-8
 # ---- base OS + build tooling --------------------------------------------
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl wget git unzip xz-utils \
-        build-essential gcc-15 g++-15 clang-21 lld-21 llvm-21 \
+        build-essential libglib2.0-0 gcc-15 g++-15 clang-21 lld-21 llvm-21 \
         make cmake ninja-build pkg-config \
         python3 python3-dev python3-pip python3-venv \
         golang-1.26 \
