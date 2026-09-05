@@ -1,2 +1,3 @@
 ~/Programming/chromium_src:/projects/chromium_src:rw
 ~/Programming/Ourobrowser:/projects/Ourobrowser:rw
+~/Programming/depot_tools:/projects/depot_tools:rw
