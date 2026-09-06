@@ -47,6 +47,7 @@ tree-sitter-c==0.24.2
 tree-sitter-cpp==0.23.4
 tree-sitter-go==0.25.0
 tree-sitter-rust==0.24.2
+tree-sitter-swift==0.7.3
 EOF
 echo "[1/4] wrote $REQ"
 
