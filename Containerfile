@@ -75,7 +75,7 @@ RUN /opt/venv/bin/pip install --no-cache-dir -r /opt/requirements-analysis.txt \
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV VIRTUAL_ENV=/opt/venv
 
-# ---- Lean 4, for the proof line (the owner, 2026-09-07: "if you need it, install it")
+# ---- Lean 4, for the proof line (ruled 2026-09-07: install what the line needs)
 # elan is Lean's toolchain manager; one pinned stable toolchain, installed
 # system-wide under /opt so every lane sees `lean` and `lake`. Core Lean 4
 # carries BitVec and the bv_decide tactic (bit-blasting with a checked
