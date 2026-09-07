@@ -37,9 +37,6 @@ note "  airlock.bundle  $(du -h "$OUT/airlock.bundle" | cut -f1)  head=$(git rev
 
 # ---- 2. the images, as they are built here (no rebuild on the far side) --
 note "[2/5] images: podman save"
-for img in $(grep -h '^\s*runner_image\|^\s*proxy_image' instances/*.conf 2>/dev/null | sed 's/#.*//' | awk -F= '{gsub(/ /,"",$2); print $2}' | sort -u; echo sandbox-runner:latest sandbox-proxy:latest); do
-    :
-done
 IMAGES=$( { grep -h '^\s*runner_image\|^\s*proxy_image' instances/*.conf 2>/dev/null | sed 's/#.*//' | awk -F= '{gsub(/ /,"",$2); print $2}'; echo sandbox-runner:latest; echo sandbox-proxy:latest; } | sort -u )
 for img in $IMAGES; do
     if podman image exists "localhost/$img" 2>/dev/null || podman image exists "$img" 2>/dev/null; then
