@@ -75,6 +75,19 @@ RUN /opt/venv/bin/pip install --no-cache-dir -r /opt/requirements-analysis.txt \
 ENV PATH="/opt/venv/bin:${PATH}"
 ENV VIRTUAL_ENV=/opt/venv
 
+# ---- Lean 4, for the proof line (the owner, 2026-09-07: "if you need it, install it")
+# elan is Lean's toolchain manager; one pinned stable toolchain, installed
+# system-wide under /opt so every lane sees `lean` and `lake`. Core Lean 4
+# carries BitVec and the bv_decide tactic (bit-blasting with a checked
+# certificate), which is all the first experiments need; Mathlib is NOT
+# installed (multi-GB cache). See PseudoCoupHQ research node gate/lean.
+ENV ELAN_HOME=/opt/elan
+ENV PATH="/opt/elan/bin:${PATH}"
+RUN curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+      | sh -s -- -y --no-modify-path --default-toolchain leanprover/lean4:v4.24.0 \
+    && chmod -R a+rwX /opt/elan \
+    && /opt/elan/bin/lean --version
+
 # npm and nodejs are versioned independently in Ubuntu and drift apart
 # (this image pairs node 22.22.1 with npm 9). npm@latest now requires
 # node >=22.22.2, one patch newer than the distro ships, so pin to the
