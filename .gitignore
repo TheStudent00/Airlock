@@ -103,3 +103,4 @@ run_logs/
 
 # install_quadlet.sh writes one record per instance; each names real paths.
 DevComms/quadlet_install_*.txt
+instances/*.mounts

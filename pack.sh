@@ -53,6 +53,7 @@ note "[3/5] config: instances, mounts, allowlist"
 cp instances/*.conf "$OUT/config/instances/" 2>/dev/null || true
 [ -f mounts.conf ] && cp mounts.conf "$OUT/config/mounts.conf"
 [ -f proxy/allowlist.txt ] && cp proxy/allowlist.txt "$OUT/config/proxy/allowlist.txt"
+echo "${AL_ROOT#$HOME/}" > "$OUT/config/tool_path"
 note "  $(ls "$OUT/config/instances" | wc -l) instance confs; mounts.conf $([ -f mounts.conf ] && echo yes || echo no); allowlist $([ -f proxy/allowlist.txt ] && echo yes || echo no)"
 
 # ---- 4. the persist volume (toolchains installed at run time live here) ---
