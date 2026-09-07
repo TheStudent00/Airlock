@@ -24,7 +24,7 @@
 #   running on the image it started with until you take it down and up again.
 #
 # RUN IT WHEN YOU LIKE:
-#   bash ~/Programming/Airlock/install_pipeline_toolchain.sh
+#   bash <airlock>/install_pipeline_toolchain.sh
 set -euo pipefail
 cd "$(dirname "$0")"
 

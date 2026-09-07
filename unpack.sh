@@ -4,7 +4,9 @@
 #
 #   bash unpack.sh [--airlock <dir>] [--home <dir>] [--cpus N] [--memory Ng] [--up <instance>]...
 #
-#   --airlock   where the tool checkout goes      (default ~/Programming/Airlock)
+#   --airlock   where the tool checkout goes      (default: the same place
+#               relative to $HOME that it had on the packing machine, read
+#               from config/tool_path)
 #   --home      where projects/ is restored to     (default $HOME; paths in
 #               mounts.conf were written as ~/..., so keeping the same layout
 #               means mounts.conf needs no edit)
@@ -12,7 +14,7 @@
 #   --up        instances to start now (repeatable); none = start nothing
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-AL="$HOME/Programming/Airlock"; DEST_HOME="$HOME"; CPUS=""; MEM=""; UP=()
+AL="$HOME/$(cat "$HERE/config/tool_path" 2>/dev/null || echo airlock)"; DEST_HOME="$HOME"; CPUS=""; MEM=""; UP=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --airlock) AL="$2"; shift 2 ;;
