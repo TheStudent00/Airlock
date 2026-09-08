@@ -12,17 +12,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 AL_ROOT="$(pwd)"
 
-OUT=""; WITH_PERSIST=1; WITH_PROJECTS=1; SKIP=()
+OUT=""; WITH_PERSIST=1; WITH_PROJECTS=1; SKIP=(); EXTRA=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --out) OUT="$2"; shift 2 ;;
         --no-persist) WITH_PERSIST=0; shift ;;
         --no-projects) WITH_PROJECTS=0; shift ;;
         --skip) SKIP+=("$2"); shift 2 ;;
+        --extra) EXTRA+=("$2"); shift 2 ;;
         *) echo "unknown flag: $1" >&2; exit 2 ;;
     esac
 done
-[ -n "$OUT" ] || { echo "usage: bash pack.sh --out <dir> [--no-persist] [--no-projects] [--skip <substring>]..." >&2; exit 2; }
+[ -n "$OUT" ] || { echo "usage: bash pack.sh --out <dir> [--no-persist] [--no-projects] [--skip <substring>]... [--extra <host dir>]..." >&2; exit 2; }
 mkdir -p "$OUT/config/instances" "$OUT/config/proxy" "$OUT/projects"
 OUT="$(cd "$OUT" && pwd)"
 MAN="$OUT/MANIFEST.txt"
@@ -87,7 +88,24 @@ if [ "$WITH_PROJECTS" = 1 ] && [ -f mounts.conf ]; then
         rsync -a --delete "$expanded/" "$OUT/projects/$rel/"
         note "  $host  ->  projects/$rel  $(du -sh "$OUT/projects/$rel" | cut -f1)"
     done < mounts.conf
+    for x in "${EXTRA[@]:-}"; do
+        [ -n "$x" ] || continue
+        expanded="${x/#\~/$HOME}"
+        if [ ! -d "$expanded" ]; then note "  $x  MISSING here (--extra)"; continue; fi
+        rel="${expanded#$HOME/}"
+        mkdir -p "$OUT/projects/$(dirname "$rel")"
+        rsync -a --delete "$expanded/" "$OUT/projects/$rel/"
+        note "  $x  ->  projects/$rel  $(du -sh "$OUT/projects/$rel" | cut -f1)  (--extra)"
+    done
     echo "$HOME" > "$OUT/projects/.packed_from_home"
+    # A symlink whose target was not packed cannot be restored and stops some
+    # copy tools outright ("symlinks are not supported by backend"). Report and
+    # remove them rather than shipping a link to nothing.
+    while IFS= read -r dead; do
+        [ -n "$dead" ] || continue
+        note "  DANGLING, removed: ${dead#$OUT/}  ->  $(readlink "$dead")"
+        rm -f "$dead"
+    done < <(find "$OUT/projects" -xtype l)
 else
     note "[5/5] projects: skipped"
 fi
