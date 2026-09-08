@@ -14,7 +14,7 @@
 #   --up        instances to start now (repeatable); none = start nothing
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-AL="$HOME/$(cat "$HERE/config/tool_path" 2>/dev/null || echo airlock)"; DEST_HOME="$HOME"; CPUS=""; MEM=""; UP=()
+AL="$HOME/$(cat "$HERE/config/tool_path" 2>/dev/null || echo airlock)"; DEST_HOME="$HOME"; CPUS=""; MEM=""; UP=(); VERIFY_ONLY=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --airlock) AL="$2"; shift 2 ;;
@@ -22,9 +22,27 @@ while [ $# -gt 0 ]; do
         --cpus) CPUS="$2"; shift 2 ;;
         --memory) MEM="$2"; shift 2 ;;
         --up) UP+=("$2"); shift 2 ;;
+        --verify) VERIFY_ONLY=1; shift ;;
         *) echo "unknown flag: $1" >&2; exit 2 ;;
     esac
 done
+# ---- every top-level file the size list names must be the size it names ----
+SHORT=()
+if [ -f "$HERE/SIZES.txt" ]; then
+    while read -r want name; do
+        [ -n "$name" ] || continue
+        got=$(stat -c%s "$HERE/$name" 2>/dev/null || echo 0)
+        if [ "$got" != "$want" ]; then
+            SHORT+=("$name"); echo "  SHORT  $name: $got bytes here, $want in the bundle"
+        fi
+    done < "$HERE/SIZES.txt"
+    if [ ${#SHORT[@]} -eq 0 ]; then echo "  every file matches the size list"
+    else echo "  ${#SHORT[@]} file(s) did not copy in full -- copy those again, or accept the loss below"; fi
+else
+    echo "  no SIZES.txt in this bundle; sizes not checked"
+fi
+[ "$VERIFY_ONLY" = 1 ] && exit 0
+
 command -v podman >/dev/null || { echo "podman is not installed (apt install podman)"; exit 1; }
 command -v git >/dev/null || { echo "git is not installed"; exit 1; }
 command -v rsync >/dev/null || { echo "rsync is not installed"; exit 1; }
@@ -60,8 +78,10 @@ echo "[4/6] persist volumes -> podman volume import"
 for f in "$HERE"/volume_*.tar; do
     [ -f "$f" ] || continue
     v="$(basename "$f" .tar)"; v="${v#volume_}"
+    skip=0; for s in "${SHORT[@]:-}"; do [ "$(basename "$f")" = "$s" ] && skip=1; done
+    if [ "$skip" = 1 ]; then echo "  $v SKIPPED, its tar did not copy in full"; continue; fi
     podman volume exists "$v" 2>/dev/null || podman volume create "$v" >/dev/null
-    podman volume import "$v" "$f"; echo "  $v restored"
+    if podman volume import "$v" "$f"; then echo "  $v restored"; else echo "  $v FAILED to import, continuing"; fi
 done
 
 echo "[5/6] projects -> $DEST_HOME"
