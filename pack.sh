@@ -106,6 +106,17 @@ if [ "$WITH_PROJECTS" = 1 ] && [ -f mounts.conf ]; then
         note "  DANGLING, removed: ${dead#$OUT/}  ->  $(readlink "$dead")"
         rm -f "$dead"
     done < <(find "$OUT/projects" -xtype l)
+    # Every surviving symlink becomes a copy of what it points at. A bundle
+    # with no symlinks in it can be moved by ANY tool: several copy backends
+    # (network shares, GUI file managers, object storage) refuse a symlink
+    # outright with "symlinks are not supported by backend".
+    n=0
+    while IFS= read -r link; do
+        [ -n "$link" ] || continue
+        tgt="$(readlink -f "$link")"
+        rm -f "$link"; cp -a "$tgt" "$link"; n=$((n+1))
+    done < <(find "$OUT/projects" -type l)
+    [ "$n" -gt 0 ] && note "  $n symlink(s) replaced by a copy of the file, so the bundle holds no symlinks"
 else
     note "[5/5] projects: skipped"
 fi
