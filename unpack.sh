@@ -90,6 +90,21 @@ if [ -d "$HERE/projects" ]; then
     echo "  $(find "$HERE/projects" -mindepth 2 -maxdepth 2 -type d | wc -l) top-level project dirs restored"
 fi
 
+# ---- a mounts.conf line whose path is not here would stop up.sh dead -------
+if [ -f "$AL/mounts.conf" ]; then
+    MISSING=0
+    while IFS= read -r line; do
+        case "$line" in ''|'#'*) continue ;; esac
+        host="${line%%:*}"; expanded="${host/#\~/$DEST_HOME}"
+        if [ ! -e "$expanded" ]; then
+            sed -i "s|^$(printf '%s' "$line" | sed 's/[|.*^$]/\\&/g')|# NOT ON THIS MACHINE, commented out by unpack.sh: &|" "$AL/mounts.conf"
+            echo "  MOUNT not here, commented out so up.sh can start: $host"
+            MISSING=$((MISSING+1))
+        fi
+    done < "$AL/mounts.conf"
+    [ "$MISSING" -gt 0 ] && echo "  $MISSING mount(s) absent. A task that reads one needs it packed and copied first; re-run pack.sh without the matching --skip."
+fi
+
 echo "[6/6] up"
 cd "$AL"
 if [ ${#UP[@]} -eq 0 ]; then
