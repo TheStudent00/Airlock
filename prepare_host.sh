@@ -8,9 +8,10 @@
 #
 # WHY THE CGROUP PART EXISTS
 #   Rootless podman can only apply --cpus when systemd delegates the `cpu`
-#   controller to the user slice. Debian and Ubuntu delegate memory and pids
-#   but NOT cpu, so without the drop-in this file writes, every instance's
-#   cpus setting is silently ignored and one lane can take the whole machine.
+#   controller to the user slice. Some distributions delegate memory and pids
+#   only; on those, every instance's cpus setting is silently ignored and one
+#   lane can take the whole machine. This script READS the delegated
+#   controllers and writes the drop-in only when cpu is missing.
 set -euo pipefail
 CHECK=0
 [ "${1:-}" = "--check" ] && CHECK=1
@@ -51,10 +52,15 @@ fi
 
 say
 say "== cgroup delegation for rootless caps =="
-sudo mkdir -p "$(dirname "$DELEG")"
-printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee "$DELEG" >/dev/null
-sudo systemctl daemon-reload
-say "  wrote $DELEG"
+CTRL="$(cat "/sys/fs/cgroup/user.slice/user-$(id -u).slice/cgroup.controllers" 2>/dev/null || echo '')"
+if echo "$CTRL" | grep -qw cpu; then
+    say "  cpu is already delegated to this user ($CTRL); no drop-in needed"
+else
+    sudo mkdir -p "$(dirname "$DELEG")"
+    printf '[Service]\nDelegate=cpu cpuset io memory pids\n' | sudo tee "$DELEG" >/dev/null
+    sudo systemctl daemon-reload
+    say "  wrote $DELEG -- log out and back in for it to apply"
+fi
 
 say
 say "== keep containers running when nobody is logged in =="
