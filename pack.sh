@@ -121,6 +121,10 @@ else
     note "[5/5] projects: skipped"
 fi
 
-cp unpack.sh "$OUT/unpack.sh"
+cp unpack.sh prepare_host.sh MOVING.md "$OUT/" 2>/dev/null || cp unpack.sh "$OUT/unpack.sh"
+# A size list, so a transfer that truncates a file is caught before anything
+# is restored from it. 26 GB over a network share is exactly where this bites.
+( cd "$OUT" && find . -maxdepth 1 -type f ! -name SIZES.txt -printf '%s %f\n' | sort -k2 > SIZES.txt )
+note "wrote SIZES.txt ($(wc -l < "$OUT/SIZES.txt") files); verify after copying with:  bash unpack.sh --verify"
 note "total $(du -sh "$OUT" | cut -f1)"
 note "next: copy $OUT to the other machine and run: bash unpack.sh"
