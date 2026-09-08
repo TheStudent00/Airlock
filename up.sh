@@ -152,11 +152,33 @@ fi
 # explicitly here from the instance's own proxy name, so the baked-in value
 # is never what an instance relies on. For the default instance these are
 # the same strings the image already carried.
+#
+# The runner reaches the proxy BY NAME, and on some hosts nothing resolves
+# that name. podman's older CNI backend, which is what Ubuntu 24.04's podman
+# 4.9 uses, gives an --internal network no DNS at all: the dnsname plugin is
+# attached only to networks that are not internal. The newer netavark backend
+# resolves container names on internal networks, so the same instance works
+# there and fails here, with every fetch returning nothing and no error
+# naming the cause. Seen 2026-09-08 on a fresh Ubuntu 24.04 guest.
+#
+# So the proxy's address on the internal network is read back after it
+# starts, and given to the runner as a hosts entry. The name stays the same
+# everywhere; only the lookup changes. Nothing is added when the proxy is off.
 PROXY_ENV=()
+PROXY_HOST_ARGS=()
 if [ "$AL_USE_PROXY" = "yes" ]; then
     PROXY_URL="http://$AL_PROXY:3128"
     PROXY_ENV=(-e "http_proxy=$PROXY_URL" -e "https_proxy=$PROXY_URL"
                -e "HTTP_PROXY=$PROXY_URL" -e "HTTPS_PROXY=$PROXY_URL")
+    proxy_ip="$(podman inspect "$AL_PROXY" \
+        --format "{{(index .NetworkSettings.Networks \"$AL_NET_INTERNAL\").IPAddress}}" 2>/dev/null || echo "")"
+    if [ -n "$proxy_ip" ]; then
+        PROXY_HOST_ARGS=(--add-host "$AL_PROXY:$proxy_ip")
+        echo "  proxy on $AL_NET_INTERNAL is $proxy_ip (given to the runner as a hosts entry)"
+    else
+        echo "  WARNING: could not read $AL_PROXY's address on $AL_NET_INTERNAL;" >&2
+        echo "           the runner will depend on the network's own name lookup." >&2
+    fi
 else
     PROXY_ENV=(-e "http_proxy=" -e "https_proxy=" -e "HTTP_PROXY=" -e "HTTPS_PROXY=")
 fi
@@ -201,6 +223,7 @@ else
         "${MOUNT_ARGS[@]}" \
         -v "$AL_PERSIST:/persist:$AL_PERSIST_MODE" \
         "${PROXY_ENV[@]}" \
+        "${PROXY_HOST_ARGS[@]}" \
         -e "LANE_NICE=$AL_LANE_NICE" \
         -e "SCRIPT_TIMEOUT=$AL_SCRIPT_TIMEOUT" \
         -e "AIRLOCK_WATCH=$AL_WATCH" \
