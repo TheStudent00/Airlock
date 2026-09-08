@@ -43,7 +43,7 @@ say "== installing =="
 if have apt-get; then
     sudo apt-get update
     sudo apt-get install -y --no-install-recommends \
-        podman uidmap passt fuse-overlayfs dbus-user-session \
+        podman uidmap passt slirp4netns fuse-overlayfs dbus-user-session \
         git rsync python3 ca-certificates
 else
     say "no apt-get here; install podman, uidmap, passt, fuse-overlayfs, git, rsync, python3 by hand, then re-run."
