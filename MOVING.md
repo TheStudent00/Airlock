@@ -38,3 +38,17 @@ Settings that matter for the guest:
 | disk, at least four times the bundle's size | the bundle, the loaded images, the restored volumes and the restored projects all land on it, and lanes then write scratch |
 | bridged network | so the bundle can be copied straight into the guest, and so a session can reach it |
 | virtual disk on the fastest pool available | the term stores and the regen stores are read repeatedly by long lanes |
+
+## Two more scripts, for a machine the bundle cannot be copied into
+
+| script | what it does |
+|---|---|
+| `push_bundle.sh` | restores a bundle onto a remote machine over ssh, streaming each archive straight into podman there, so the archives never occupy the receiving disk. For a machine with no share and no room for the bundle beside what is restored from it |
+| `remote_lane.sh` | drives the remote install from here with the same lane protocol: `submit`, `wait`, `log`, `status`, `up`, `down`, `conf`, and `sync-to` / `sync-back` to mirror a working folder around a lane. `AIRLOCK_REMOTE` and `AIRLOCK_REMOTE_ROOT` name the target |
+
+`prepare_host.sh` installs, besides podman itself, the pieces a distribution's
+podman 4.x needs and does not pull in: `slirp4netns` for rootless networking,
+and the `dnsname` CNI plugin. `up.sh` no longer depends on container name
+lookup at all: it reads the proxy's address after starting it and hands the
+runner a hosts entry, because the CNI backend gives an internal network no
+name lookup.
