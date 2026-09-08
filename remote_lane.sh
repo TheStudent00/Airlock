@@ -75,7 +75,7 @@ case "$CMD" in
         lane="${REST[0]:?lane.sh}"; [ -f "$lane" ] || { echo "no such lane: $lane" >&2; exit 2; }
         "${SSH[@]}" "mkdir -p '$ROOT/.remote_lanes'"
         scp -o BatchMode=yes -q "$lane" "$TO:$ROOT/.remote_lanes/$(basename "$lane")"
-        args=(--instance "$INSTANCE" submit "$ROOT/.remote_lanes/$(basename "$lane")")
+        args=(--instance "$INSTANCE" submit ".remote_lanes/$(basename "$lane")")   # relative to the remote tool root, which the ssh command cds into
         [ -n "$BATCH" ] && args+=(--batch "$BATCH") || args+=(--no-batch)
         [ -n "$WEIGHT" ] && args+=(--weight "$WEIGHT")
         "${SSH[@]}" "cd '$ROOT' && python3 ./airlock $(printf '%q ' "${args[@]}")" ;;
