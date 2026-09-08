@@ -66,9 +66,9 @@ done
 say
 say "== 4/6 configuration =="
 "${SSH[@]}" "mkdir -p \"\$HOME/$TOOL_REL/instances\" \"\$HOME/$TOOL_REL/proxy\""
-scp -o BatchMode=yes -q "$BUNDLE"/config/instances/*.conf "$TO:\$HOME/$TOOL_REL/instances/" 2>/dev/null || true
-[ -f "$BUNDLE/config/mounts.conf" ] && scp -o BatchMode=yes -q "$BUNDLE/config/mounts.conf" "$TO:\$HOME/$TOOL_REL/mounts.conf"
-[ -f "$BUNDLE/config/proxy/allowlist.txt" ] && scp -o BatchMode=yes -q "$BUNDLE/config/proxy/allowlist.txt" "$TO:\$HOME/$TOOL_REL/proxy/allowlist.txt"
+scp -o BatchMode=yes -q "$BUNDLE"/config/instances/*.conf "$TO:$TOOL_REL/instances/" 2>/dev/null || true
+[ -f "$BUNDLE/config/mounts.conf" ] && scp -o BatchMode=yes -q "$BUNDLE/config/mounts.conf" "$TO:$TOOL_REL/mounts.conf"
+[ -f "$BUNDLE/config/proxy/allowlist.txt" ] && scp -o BatchMode=yes -q "$BUNDLE/config/proxy/allowlist.txt" "$TO:$TOOL_REL/proxy/allowlist.txt"
 say "  $(ls "$BUNDLE"/config/instances/*.conf 2>/dev/null | wc -l) instance configurations, mounts file, allowlist"
 
 say
