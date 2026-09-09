@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         golang-1.26 \
         nodejs npm \
         openjdk-25-jdk-headless \
-        ruby perl php-cli \
+        ruby perl php-cli libncurses6 \
         jq ripgrep fd-find plocate inotify-tools \
     && rm -rf /var/lib/apt/lists/*
 
