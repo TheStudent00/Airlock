@@ -17,7 +17,9 @@
 #                                              copy the lane, then the remote CLI's submit
 #   status    --instance I [lane.sh]           the remote CLI's status
 #   wait      --instance I <lane.sh> [--timeout S]
-#                                              poll the lane's status file until state=done (default 3500 s), then print its log
+#                                              poll the lane's status file until state=done, at most S seconds (default 100:
+#                                              an agent's tool call is cut at 120 s and moved to the background, and the
+#                                              agent then loses the wait — so repeat short waits, never one long one)
 #   log       --instance I <lane.sh>           print the newest log for that lane
 #
 # The lane's ARTIFACTS are whatever the lane wrote under the remote copy of
@@ -43,7 +45,7 @@ agent_dir() {   # the remote agent tree for an instance, as up.sh derives it
     if [ "$1" = sandbox ]; then echo "$ROOT/agent"; else echo "AirlockRuns/$1/agent"; fi
 }
 parse_instance() {
-    INSTANCE=""; BATCH=""; WEIGHT=""; TIMEOUT=3500; REST=()
+    INSTANCE=""; BATCH=""; WEIGHT=""; TIMEOUT=100; REST=()   # wait: at most 100 s per call; an agent tool moves a longer call to the background and the caller loses it
     while [ $# -gt 0 ]; do
         case "$1" in
             --instance) INSTANCE="$2"; shift 2 ;;
@@ -88,7 +90,7 @@ case "$CMD" in
         echo "  waiting on $lane (instance $INSTANCE, up to ${TIMEOUT}s)"
         "${SSH[@]}" "t=0; until grep -q '^state=done' '$A/status/$lane.status' 2>/dev/null; do sleep 15; t=\$((t+15)); [ \$t -ge $TIMEOUT ] && { echo '  TIMEOUT: still running'; exit 3; }; done
             grep -E '^(exit|elapsed_s|work_consumed_mb|verdict)=' '$A/status/$lane.status' | sed 's/^/  /'
-            echo '  ---- log ----'; cat \"\$(ls -t '$A/logs/'*__$lane.log | head -1)\"" ;;
+            echo '  ---- log ----'; cat \"\$(ls -t '$A/logs/'*__$lane.log | head -1)\"" || { rc=$?; [ $rc -eq 3 ] && echo "  (still running: call wait again; progress: $("${SSH[@]}" "grep -o '\[[0-9]*/[0-9]*\]' \"\$(ls -t '$A/logs/'*__$lane.log 2>/dev/null | head -1)\" 2>/dev/null | tail -1")"; exit $rc; } ;;
     log)
         parse_instance "$@"; need_instance
         lane="$(basename "${REST[0]:?lane.sh}")"; A="$(agent_dir "$INSTANCE")"
