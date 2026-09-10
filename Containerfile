@@ -120,9 +120,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         opam m4 libgmp-dev pkg-config libz3-dev z3 \
     && rm -rf /var/lib/apt/lists/*
 ENV OPAMROOT=/opt/opam
+# isla-sail needs the LATEST Sail from GitHub, not opam's release ("Sail
+# doesn't have any kind of stable external API", isla-sail/README): pin it.
 RUN opam init --disable-sandboxing --bare -y \
     && opam switch create default 5.2.1 -y \
-    && opam install -y sail \
+    && opam pin add -y --no-action libsail https://github.com/rems-project/sail.git \
+    && opam pin add -y --no-action sail https://github.com/rems-project/sail.git \
+    && opam install -y libsail sail dune \
     && chmod -R a+rX /opt/opam
 ENV PATH="/opt/opam/default/bin:${PATH}"
 RUN /opt/cargo/bin/cargo install --locked --git https://github.com/rems-project/isla.git isla \
@@ -131,7 +135,6 @@ RUN /opt/cargo/bin/cargo install --locked --git https://github.com/rems-project/
 # a Sail model into Isla's IR. Built from the isla checkout against libsail.
 RUN git clone --depth 1 https://github.com/rems-project/isla.git /opt/isla-src \
     && eval $(opam env --root=/opt/opam --switch=default --set-root --set-switch) \
-    && opam install -y dune libsail \
     && cd /opt/isla-src/isla-sail && dune build --release && dune install \
     && which isla-sail
 # the unsuffixed name for the disassembler that reads every architecture
