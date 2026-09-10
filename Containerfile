@@ -136,9 +136,9 @@ RUN /opt/cargo/bin/cargo install --locked --git https://github.com/rems-project/
 RUN git clone --depth 1 https://github.com/riscv/sail-riscv.git /opt/sail-riscv-src \
     && eval $(opam env --root=/opt/opam --switch=default --set-root --set-switch) \
     && cd /opt/sail-riscv-src && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFIRST_PARTY_TESTS=OFF 2>&1 | tail -2 \
-    && cmake --build build --target riscv_sim_rv64d -j"$(nproc)" 2>&1 | tail -2 \
-    && ls build/c_emulator/ | grep -i sim && cp build/c_emulator/riscv_sim_rv64d /usr/local/bin/ \
-    && riscv_sim_rv64d --help 2>&1 | head -2
+    && cmake --build build --target sail_riscv_sim -j"$(nproc)" 2>&1 | tail -2 \
+    && ls build/c_emulator/ | grep -i sim && cp build/c_emulator/sail_riscv_sim /usr/local/bin/ \
+    && sail_riscv_sim --help 2>&1 | head -2
 # the unsuffixed name for the disassembler that reads every architecture
 RUN ln -sf /usr/bin/llvm-objdump-21 /usr/bin/llvm-objdump && llvm-objdump --version | head -1
 
