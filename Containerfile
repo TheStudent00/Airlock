@@ -110,17 +110,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 RUN mkdir -p /drop /logs /work /out /opt/daemon
 COPY daemon/watcher.py /opt/daemon/watcher.py
 
-# Proxy variables are baked in so every script inherits them. The proxy
-# hostname resolves only on the internal podman network.
-ENV http_proxy=http://sandbox-proxy:3128 \
-    https_proxy=http://sandbox-proxy:3128 \
-    HTTP_PROXY=http://sandbox-proxy:3128 \
-    HTTPS_PROXY=http://sandbox-proxy:3128 \
-    no_proxy=localhost,127.0.0.1
-
-WORKDIR /work
-CMD ["python3", "-u", "/opt/daemon/watcher.py"]
-
 # ---- RISC-V as a second architecture (ruled 2026-09-10: "explore it as an
 # option"). The rust riscv64 target for freestanding objects; Sail (the
 # ratified RISC-V model's language) via opam; Isla, the symbolic executor
@@ -138,3 +127,14 @@ RUN opam init --disable-sandboxing --bare -y \
 ENV PATH="/opt/opam/default/bin:${PATH}"
 RUN /opt/cargo/bin/cargo install --locked --git https://github.com/rems-project/isla.git isla isla-sail 2>&1 | tail -3 \
     && ls /opt/cargo/bin | grep -i isla
+
+# Proxy variables are baked in so every script inherits them. The proxy
+# hostname resolves only on the internal podman network.
+ENV http_proxy=http://sandbox-proxy:3128 \
+    https_proxy=http://sandbox-proxy:3128 \
+    HTTP_PROXY=http://sandbox-proxy:3128 \
+    HTTPS_PROXY=http://sandbox-proxy:3128 \
+    no_proxy=localhost,127.0.0.1
+
+WORKDIR /work
+CMD ["python3", "-u", "/opt/daemon/watcher.py"]
