@@ -120,3 +120,21 @@ ENV http_proxy=http://sandbox-proxy:3128 \
 
 WORKDIR /work
 CMD ["python3", "-u", "/opt/daemon/watcher.py"]
+
+# ---- RISC-V as a second architecture (ruled 2026-09-10: "explore it as an
+# option"). The rust riscv64 target for freestanding objects; Sail (the
+# ratified RISC-V model's language) via opam; Isla, the symbolic executor
+# that turns a Sail instruction into SMT. clang and go already target
+# riscv64; llvm-objdump carves it. The model itself is read from /sources.
+RUN /opt/cargo/bin/rustup target add riscv64gc-unknown-none-elf
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        opam m4 libgmp-dev pkg-config libz3-dev z3 \
+    && rm -rf /var/lib/apt/lists/*
+ENV OPAMROOT=/opt/opam
+RUN opam init --disable-sandboxing --bare -y \
+    && opam switch create default 5.2.1 -y \
+    && opam install -y sail \
+    && chmod -R a+rX /opt/opam
+ENV PATH="/opt/opam/default/bin:${PATH}"
+RUN /opt/cargo/bin/cargo install --locked --git https://github.com/rems-project/isla.git isla isla-sail 2>&1 | tail -3 \
+    && ls /opt/cargo/bin | grep -i isla
