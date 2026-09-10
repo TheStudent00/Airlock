@@ -120,23 +120,25 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         opam m4 libgmp-dev pkg-config libz3-dev z3 \
     && rm -rf /var/lib/apt/lists/*
 ENV OPAMROOT=/opt/opam
-# isla-sail needs the LATEST Sail from GitHub, not opam's release ("Sail
-# doesn't have any kind of stable external API", isla-sail/README): pin it.
 RUN opam init --disable-sandboxing --bare -y \
     && opam switch create default 5.2.1 -y \
-    && opam pin add -y --no-action libsail https://github.com/rems-project/sail.git \
-    && opam pin add -y --no-action sail https://github.com/rems-project/sail.git \
-    && opam install -y libsail sail dune \
+    && opam install -y sail \
     && chmod -R a+rX /opt/opam
 ENV PATH="/opt/opam/default/bin:${PATH}"
 RUN /opt/cargo/bin/cargo install --locked --git https://github.com/rems-project/isla.git isla \
     && ls /opt/cargo/bin | grep -c isla
-# isla-sail is Sail's own plugin (OCaml, dune), not a cargo crate: it compiles
-# a Sail model into Isla's IR. Built from the isla checkout against libsail.
-RUN git clone --depth 1 https://github.com/rems-project/isla.git /opt/isla-src \
+# isla-sail (Sail's plugin that compiles a model into Isla's form) tracks
+# Sail's GitHub master and does not build against any released Sail
+# (tried 2026-09-10: 0.20.2 lacks `Sail_file.Path`; master fails in opam).
+# The formal reading of RISC-V comes instead from the ratified model's own
+# C simulator, built here with the released Sail: concrete execution of any
+# instruction on chosen inputs, the fuzz method's oracle.
+RUN git clone --depth 1 https://github.com/riscv/sail-riscv.git /opt/sail-riscv-src \
     && eval $(opam env --root=/opt/opam --switch=default --set-root --set-switch) \
-    && cd /opt/isla-src/isla-sail && dune build --release && dune install \
-    && which isla-sail
+    && cd /opt/sail-riscv-src && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DFIRST_PARTY_TESTS=OFF 2>&1 | tail -2 \
+    && cmake --build build --target riscv_sim_rv64d -j"$(nproc)" 2>&1 | tail -2 \
+    && ls build/c_emulator/ | grep -i sim && cp build/c_emulator/riscv_sim_rv64d /usr/local/bin/ \
+    && riscv_sim_rv64d --help 2>&1 | head -2
 # the unsuffixed name for the disassembler that reads every architecture
 RUN ln -sf /usr/bin/llvm-objdump-21 /usr/bin/llvm-objdump && llvm-objdump --version | head -1
 
