@@ -125,8 +125,17 @@ RUN opam init --disable-sandboxing --bare -y \
     && opam install -y sail \
     && chmod -R a+rX /opt/opam
 ENV PATH="/opt/opam/default/bin:${PATH}"
-RUN /opt/cargo/bin/cargo install --locked --git https://github.com/rems-project/isla.git isla isla-sail 2>&1 | tail -3 \
-    && ls /opt/cargo/bin | grep -i isla
+RUN /opt/cargo/bin/cargo install --locked --git https://github.com/rems-project/isla.git isla \
+    && ls /opt/cargo/bin | grep -c isla
+# isla-sail is Sail's own plugin (OCaml, dune), not a cargo crate: it compiles
+# a Sail model into Isla's IR. Built from the isla checkout against libsail.
+RUN git clone --depth 1 https://github.com/rems-project/isla.git /opt/isla-src \
+    && eval $(opam env --root=/opt/opam --switch=default --set-root --set-switch) \
+    && opam install -y dune libsail \
+    && cd /opt/isla-src/isla-sail && dune build --release && dune install \
+    && which isla-sail
+# the unsuffixed name for the disassembler that reads every architecture
+RUN ln -sf /usr/bin/llvm-objdump-21 /usr/bin/llvm-objdump && llvm-objdump --version | head -1
 
 # Proxy variables are baked in so every script inherits them. The proxy
 # hostname resolves only on the internal podman network.
