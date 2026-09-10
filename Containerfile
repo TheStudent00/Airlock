@@ -144,6 +144,16 @@ RUN ln -sf /usr/bin/llvm-objdump-21 /usr/bin/llvm-objdump && llvm-objdump --vers
 
 # Proxy variables are baked in so every script inherits them. The proxy
 # hostname resolves only on the internal podman network.
+# rv2 (2026-09-10) refused 61 rust and 15 c inherited certificates on riscv64 for
+# want of a standard library and of glibc headers. The linux-gnu rust target
+# (objects only; no linker needed to carve) and the gcc cross toolchain, which
+# carries glibc and libstdc++ headers at /usr/riscv64-linux-gnu for clang's
+# --target=riscv64-linux-gnu --gcc-toolchain=/usr.
+RUN /opt/cargo/bin/rustup target add riscv64gc-unknown-linux-gnu
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        g++-riscv64-linux-gnu \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV http_proxy=http://sandbox-proxy:3128 \
     https_proxy=http://sandbox-proxy:3128 \
     HTTP_PROXY=http://sandbox-proxy:3128 \
