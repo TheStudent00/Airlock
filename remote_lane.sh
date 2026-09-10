@@ -57,20 +57,39 @@ parse_instance() {
     done
 }
 
+# The laptop's ~/Programming is split into PRIVATE/ and PUBLIC/ (DevComms
+# log_001); the tower keeps the flat layout. flat_rel: any spelling -> the
+# tower's flat path. local_rel: any spelling -> the laptop's real path.
+PRIVATE_NAMES="DevComms GitSpaceTime Misc ModelModel PlanPlan PseudoCoupHQ PseudoCoup_v5 PseudoCoup_v6 PseudoIR StressBot WFL_PseudoCoup"
+PUBLIC_NAMES="Airlock GraphModel Ourobrowser PseudoCoup REPO_STAGING ZSpectralCompression"
+flat_rel() { local r="$1"; r="${r/#Programming\/PRIVATE\//Programming/}"; r="${r/#Programming\/PUBLIC\//Programming/}"; printf '%s' "$r"; }
+local_rel() {
+    local r="$1" n rest
+    case "$r" in Programming/PRIVATE/*|Programming/PUBLIC/*) printf '%s' "$r"; return ;; esac
+    rest="${r#Programming/}"; n="${rest%%/*}"
+    for x in $PRIVATE_NAMES; do [ "$n" = "$x" ] && { printf 'Programming/PRIVATE/%s' "$rest"; return; }; done
+    for x in $PUBLIC_NAMES;  do [ "$n" = "$x" ] && { printf 'Programming/PUBLIC/%s' "$rest"; return; }; done
+    printf '%s' "$r"
+}
+
 case "$CMD" in
     # The laptop's ~/Programming is being split into PRIVATE/ and PUBLIC/
     # (DevComms log_001, 2026-09-10); the tower keeps the flat layout. The
     # local side takes rel as given (a compatibility link resolves it); the
     # remote side always uses the flat name, so either spelling of rel lands
     # in the one tree the tower's containers mount.
+    # Since the links at the old names were retired (log_001 §13), a flat
+    # rel on the laptop side is mapped to its real PRIVATE/ or PUBLIC/ path
+    # by the table below, so a lane started before the move still lands in
+    # the one real tree and never re-creates an old name as a directory.
     sync-to)
-        rel="${1:?rel-dir}"; rrel="${rel/#Programming\/PRIVATE\//Programming/}"; rrel="${rrel/#Programming\/PUBLIC\//Programming/}"
+        rel="${1:?rel-dir}"; rrel="$(flat_rel "$rel")"; lrel="$(local_rel "$rel")"
         "${SSH[@]}" "mkdir -p '$rrel'"
-        rsync -au --info=stats1 -e "$RSYNC_SSH" "$HOME/$rel/" "$TO:$rrel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
+        rsync -au --info=stats1 -e "$RSYNC_SSH" "$HOME/$lrel/" "$TO:$rrel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
     sync-back)
-        rel="${1:?rel-dir}"; rrel="${rel/#Programming\/PRIVATE\//Programming/}"; rrel="${rrel/#Programming\/PUBLIC\//Programming/}"
-        mkdir -p "$HOME/$rel"
-        rsync -au --info=stats1 -e "$RSYNC_SSH" "$TO:$rrel/" "$HOME/$rel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
+        rel="${1:?rel-dir}"; rrel="$(flat_rel "$rel")"; lrel="$(local_rel "$rel")"
+        mkdir -p "$HOME/$lrel"
+        rsync -au --info=stats1 -e "$RSYNC_SSH" "$TO:$rrel/" "$HOME/$lrel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
     conf)
         f="${1:?instances/NAME.conf}"; scp -o BatchMode=yes -q "$f" "$TO:$ROOT/instances/$(basename "$f")"; echo "  $(basename "$f") in place on $TO" ;;
     up)
