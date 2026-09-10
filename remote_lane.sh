@@ -58,12 +58,19 @@ parse_instance() {
 }
 
 case "$CMD" in
+    # The laptop's ~/Programming is being split into PRIVATE/ and PUBLIC/
+    # (DevComms log_001, 2026-09-10); the tower keeps the flat layout. The
+    # local side takes rel as given (a compatibility link resolves it); the
+    # remote side always uses the flat name, so either spelling of rel lands
+    # in the one tree the tower's containers mount.
     sync-to)
-        rel="${1:?rel-dir}"; "${SSH[@]}" "mkdir -p '$rel'"
-        rsync -au --info=stats1 -e "$RSYNC_SSH" "$HOME/$rel/" "$TO:$rel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
+        rel="${1:?rel-dir}"; rrel="${rel/#Programming\/PRIVATE\//Programming/}"; rrel="${rrel/#Programming\/PUBLIC\//Programming/}"
+        "${SSH[@]}" "mkdir -p '$rrel'"
+        rsync -au --info=stats1 -e "$RSYNC_SSH" "$HOME/$rel/" "$TO:$rrel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
     sync-back)
-        rel="${1:?rel-dir}"; mkdir -p "$HOME/$rel"
-        rsync -au --info=stats1 -e "$RSYNC_SSH" "$TO:$rel/" "$HOME/$rel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
+        rel="${1:?rel-dir}"; rrel="${rel/#Programming\/PRIVATE\//Programming/}"; rrel="${rrel/#Programming\/PUBLIC\//Programming/}"
+        mkdir -p "$HOME/$rel"
+        rsync -au --info=stats1 -e "$RSYNC_SSH" "$TO:$rrel/" "$HOME/$rel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
     conf)
         f="${1:?instances/NAME.conf}"; scp -o BatchMode=yes -q "$f" "$TO:$ROOT/instances/$(basename "$f")"; echo "  $(basename "$f") in place on $TO" ;;
     up)
