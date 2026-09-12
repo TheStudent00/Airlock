@@ -85,11 +85,11 @@ case "$CMD" in
     sync-to)
         rel="${1:?rel-dir}"; rrel="$(flat_rel "$rel")"; lrel="$(local_rel "$rel")"
         "${SSH[@]}" "mkdir -p '$rrel'"
-        rsync -au --info=stats1 -e "$RSYNC_SSH" "$HOME/$lrel/" "$TO:$rrel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
+        rsync -au --info=stats1 -e "$RSYNC_SSH" "$HOME/$lrel/" "$TO:$rrel/" | { grep -E "^Number of (regular files transferred|created)|^Total transferred" || true; } | sed 's/^/  /' ;;
     sync-back)
         rel="${1:?rel-dir}"; rrel="$(flat_rel "$rel")"; lrel="$(local_rel "$rel")"
         mkdir -p "$HOME/$lrel"
-        rsync -au --info=stats1 -e "$RSYNC_SSH" "$TO:$rrel/" "$HOME/$lrel/" | grep -E "^Number of (regular files transferred|created)|^Total transferred" | sed 's/^/  /' ;;
+        rsync -au --info=stats1 -e "$RSYNC_SSH" "$TO:$rrel/" "$HOME/$lrel/" | { grep -E "^Number of (regular files transferred|created)|^Total transferred" || true; } | sed 's/^/  /' ;;
     conf)
         f="${1:?instances/NAME.conf}"; scp -o BatchMode=yes -q "$f" "$TO:$ROOT/instances/$(basename "$f")"; echo "  $(basename "$f") in place on $TO" ;;
     up)
