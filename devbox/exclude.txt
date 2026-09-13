@@ -1,0 +1,23 @@
+# devbox copy exclusions (rsync --exclude-from). One pattern per line.
+# Top-level third-party trees ("the Source code stuff from repos that
+# arent my own") and regenerable build output. Edit freely; census.sh
+# reads the same file.
+Sources/
+chromium_src/
+depot_tools/
+flutter/
+0_Archive/
+WFL_Projects/WFL/
+ThesisAnalysisPrompt.zip
+# regenerable, inside any repo
+node_modules/
+target/
+build/
+.stage_tmp/
+__pycache__/
+.venv/
+venv/
+*.o
+*.so
+# Airlock's run products live outside ~/Programming already; the image
+# builds are re-done from the Containerfile
